@@ -1,0 +1,112 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Client {
+  id        String   @id @default(uuid())
+  name      String
+  createdAt DateTime @default(now())
+  users     User[]
+  quoteRequests QuoteRequest[]
+  bookings  Booking[]
+  auditLogs AuditLog[]
+}
+
+model User {
+  id           String   @id @default(uuid())
+  clientId     String
+  email        String   @unique
+  passwordHash String
+  role         UserRole @default(USER)
+  createdAt    DateTime @default(now())
+  client       Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  quoteRequests QuoteRequest[]
+  bookings     Booking[]
+  auditLogs    AuditLog[]
+
+  @@index([clientId])
+  @@index([email])
+}
+
+enum UserRole {
+  ADMIN
+  USER
+}
+
+model QuoteRequest {
+  id               String   @id @default(uuid())
+  clientId         String
+  userId           String
+  requestPayloadJson Json
+  createdAt        DateTime @default(now())
+  client           Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  rates            Rate[]
+  bookings         Booking[]
+
+  @@index([clientId])
+  @@index([userId])
+  @@index([createdAt])
+}
+
+model Rate {
+  id             String        @id @default(uuid())
+  quoteRequestId String
+  rateId         String?       // External rate ID from API Gateway
+  carrierName    String
+  serviceName    String
+  transitDays    Int?
+  totalCost      Float
+  currency       String        @default("USD")
+  rawJson        Json?
+  createdAt      DateTime      @default(now())
+  quoteRequest   QuoteRequest @relation(fields: [quoteRequestId], references: [id], onDelete: Cascade)
+  bookings       Booking[]
+
+  @@index([quoteRequestId])
+}
+
+model Booking {
+  id                 String        @id @default(uuid())
+  clientId           String
+  userId             String
+  quoteRequestId     String
+  rateId             String
+  bookingIdExternal  String?       // External booking ID from API Gateway
+  confirmationNumber String?
+  status             String        @default("pending")
+  rawJson            Json?
+  createdAt          DateTime      @default(now())
+  client             Client        @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  user               User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  quoteRequest       QuoteRequest @relation(fields: [quoteRequestId], references: [id], onDelete: Cascade)
+  rate               Rate          @relation(fields: [rateId], references: [id])
+
+  @@index([clientId])
+  @@index([userId])
+  @@index([quoteRequestId])
+  @@index([createdAt])
+}
+
+model AuditLog {
+  id          String   @id @default(uuid())
+  clientId    String
+  userId      String?
+  action      String
+  metadataJson Json?
+  createdAt   DateTime @default(now())
+  client      Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  user        User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([clientId])
+  @@index([userId])
+  @@index([createdAt])
+}
