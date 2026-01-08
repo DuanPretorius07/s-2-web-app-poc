@@ -50,12 +50,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       body: JSON.stringify({ email, password }),
     });
 
+    // Get response as text first to handle non-JSON responses
+    const responseText = await response.text();
+
     if (!response.ok) {
-      const error = await response.json();
+      let error;
+      try {
+        error = JSON.parse(responseText);
+      } catch (e) {
+        throw new Error(`Login failed with status ${response.status}: ${responseText || 'No response body'}`);
+      }
       throw new Error(error.message || 'Login failed');
     }
 
-    const data = await response.json();
+    let data;
+    try {
+      data = JSON.parse(responseText);
+    } catch (e) {
+      throw new Error(`Failed to parse response: ${responseText || 'Empty response'}`);
+    }
     setUser(data.user);
   }
 

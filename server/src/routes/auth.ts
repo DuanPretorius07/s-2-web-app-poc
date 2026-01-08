@@ -53,8 +53,10 @@ function setTokenCookie(res: Response, token: string) {
 
 // POST /api/auth/login
 router.post('/login', validateBody(loginSchema), async (req, res) => {
+  console.log('[LOGIN] Endpoint hit', { email: req.body?.email });
   try {
     const { email, password } = req.body;
+    console.log('[LOGIN] Processing login', { email });
 
     const { data: user, error: userError } = await supabaseAdmin
       .from('users')
@@ -73,6 +75,7 @@ router.post('/login', validateBody(loginSchema), async (req, res) => {
       .single();
 
     if (userError || !user) {
+      console.log('[LOGIN] User not found or error', { userError: userError?.message, hasUser: !!user });
       return res.status(401).json({
         requestId: crypto.randomUUID(),
         errorCode: 'INVALID_CREDENTIALS',
@@ -105,6 +108,7 @@ router.post('/login', validateBody(loginSchema), async (req, res) => {
     });
 
     const client = Array.isArray(user.clients) ? user.clients[0] : user.clients;
+    console.log('[LOGIN] Success, sending response', { userId: user.id });
     res.json({
       user: {
         id: user.id,
@@ -114,13 +118,21 @@ router.post('/login', validateBody(loginSchema), async (req, res) => {
         clientName: client?.name || '',
       },
     });
-  } catch (error) {
-    console.error('Login error:', error);
-    res.status(500).json({
-      requestId: crypto.randomUUID(),
-      errorCode: 'INTERNAL_ERROR',
-      message: 'Login failed',
-    });
+  } catch (error: any) {
+    console.error('[LOGIN] Error caught:', error);
+    console.error('[LOGIN] Error stack:', error?.stack);
+    
+    // Ensure response hasn't been sent
+    if (!res.headersSent) {
+      res.status(500).json({
+        requestId: crypto.randomUUID(),
+        errorCode: 'INTERNAL_ERROR',
+        message: error?.message || 'Login failed',
+        details: process.env.NODE_ENV === 'development' ? error?.stack : undefined,
+      });
+    } else {
+      console.error('[LOGIN] Response already sent, cannot send error response');
+    }
   }
 });
 
