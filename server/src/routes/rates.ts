@@ -1,12 +1,11 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { PrismaClient } from '@prisma/client';
+import { supabaseAdmin } from '../lib/supabaseClient.js';
 import { authenticateToken, AuthRequest } from '../middleware/auth.js';
 import { validateBody } from '../middleware/validation.js';
 import { RateRequest, NormalizedRate } from '../types.js';
 
 const router = Router();
-const prisma = new PrismaClient();
 
 const rateRequestSchema = z.object({
   contact: z.object({
@@ -106,7 +105,7 @@ async function callApiGatewayRates(request: RateRequest): Promise<NormalizedRate
       throw new Error(`API Gateway returned ${response.status}`);
     }
 
-    const data = await response.json();
+    const data = await response.json() as any;
     
     // Normalize the response - adjust this based on your API Gateway response format
     if (Array.isArray(data.rates)) {
@@ -170,7 +169,7 @@ async function createHubSpotNote(contactEmail: string, rates: NormalizedRate[], 
       return;
     }
 
-    const searchData = await searchResponse.json();
+    const searchData = await searchResponse.json() as any;
     if (!searchData.results || searchData.results.length === 0) {
       return; // Contact not found
     }
@@ -229,13 +228,19 @@ router.post('/rates', authenticateToken, validateBody(rateRequestSchema), async 
     const requestPayload = req.body as RateRequest;
 
     // Save quote request
-    const quoteRequest = await prisma.quoteRequest.create({
-      data: {
-        clientId,
-        userId,
-        requestPayloadJson: requestPayload as any,
-      },
-    });
+    const { data: quoteRequest, error: quoteError } = await supabaseAdmin
+      .from('quote_requests')
+      .insert({
+        client_id: clientId,
+        user_id: userId,
+        request_payload_json: requestPayload as any,
+      })
+      .select('id')
+      .single();
+
+    if (quoteError || !quoteRequest) {
+      throw new Error('Failed to save quote request');
+    }
 
     // Call API Gateway
     let rates: NormalizedRate[];
@@ -251,22 +256,25 @@ router.post('/rates', authenticateToken, validateBody(rateRequestSchema), async 
     }
 
     // Save rates to database
-    const savedRates = await Promise.all(
-      rates.map(rate =>
-        prisma.rate.create({
-          data: {
-            quoteRequestId: quoteRequest.id,
-            rateId: rate.rateId,
-            carrierName: rate.carrierName,
-            serviceName: rate.serviceName,
-            transitDays: rate.transitDays,
-            totalCost: rate.totalCost,
-            currency: rate.currency,
-            rawJson: rate.rawJson as any,
-          },
-        })
-      )
-    );
+    const ratesToInsert = rates.map(rate => ({
+      quote_request_id: quoteRequest.id,
+      rate_id: rate.rateId,
+      carrier_name: rate.carrierName,
+      service_name: rate.serviceName,
+      transit_days: rate.transitDays,
+      total_cost: rate.totalCost,
+      currency: rate.currency,
+      raw_json: rate.rawJson as any,
+    }));
+
+    const { data: savedRates, error: ratesError } = await supabaseAdmin
+      .from('rates')
+      .insert(ratesToInsert)
+      .select('id, rate_id, carrier_name, service_name, transit_days, total_cost, currency');
+
+    if (ratesError || !savedRates) {
+      throw new Error('Failed to save rates');
+    }
 
     // Create HubSpot note if configured
     if (requestPayload.hubspotContext?.email || requestPayload.contact.email) {
@@ -277,15 +285,13 @@ router.post('/rates', authenticateToken, validateBody(rateRequestSchema), async 
       );
     }
 
-    await prisma.auditLog.create({
-      data: {
-        clientId,
-        userId,
-        action: 'GET_RATES',
-        metadataJson: {
-          quoteRequestId: quoteRequest.id,
-          ratesCount: rates.length,
-        },
+    await supabaseAdmin.from('audit_logs').insert({
+      client_id: clientId,
+      user_id: userId,
+      action: 'GET_RATES',
+      metadata_json: {
+        quoteRequestId: quoteRequest.id,
+        ratesCount: rates.length,
       },
     });
 
@@ -294,11 +300,11 @@ router.post('/rates', authenticateToken, validateBody(rateRequestSchema), async 
       quoteId: quoteRequest.id,
       rates: savedRates.map(r => ({
         id: r.id,
-        rateId: r.rateId,
-        carrierName: r.carrierName,
-        serviceName: r.serviceName,
-        transitDays: r.transitDays,
-        totalCost: r.totalCost,
+        rateId: r.rate_id,
+        carrierName: r.carrier_name,
+        serviceName: r.service_name,
+        transitDays: r.transit_days,
+        totalCost: parseFloat(r.total_cost.toString()),
         currency: r.currency,
       })),
     });

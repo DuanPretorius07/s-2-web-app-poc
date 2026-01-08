@@ -1,8 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
-import { PrismaClient } from '@prisma/client';
-
-const prisma = new PrismaClient();
+import { supabaseAdmin } from '../lib/supabaseClient.js';
 
 export interface AuthRequest extends Request {
   user?: {
@@ -42,12 +40,22 @@ export async function authenticateToken(
     };
 
     // Verify user still exists and is active
-    const user = await prisma.user.findUnique({
-      where: { id: decoded.userId },
-      include: { client: true },
-    });
+    const { data: user, error: userError } = await supabaseAdmin
+      .from('users')
+      .select(`
+        id,
+        email,
+        role,
+        client_id,
+        clients (
+          id,
+          name
+        )
+      `)
+      .eq('id', decoded.userId)
+      .single();
 
-    if (!user || user.clientId !== decoded.clientId) {
+    if (userError || !user || user.client_id !== decoded.clientId) {
       return res.status(401).json({
         requestId: crypto.randomUUID(),
         errorCode: 'UNAUTHORIZED',
@@ -55,9 +63,12 @@ export async function authenticateToken(
       });
     }
 
+    // Handle both snake_case and camelCase from database
+    const clientId = (user as any).client_id || (user as any).clientId || decoded.clientId;
+    
     req.user = {
       userId: decoded.userId,
-      clientId: decoded.clientId,
+      clientId: clientId,
       email: decoded.email,
       role: decoded.role,
     };

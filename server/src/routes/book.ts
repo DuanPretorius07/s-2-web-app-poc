@@ -1,11 +1,10 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { PrismaClient } from '@prisma/client';
+import { supabaseAdmin } from '../lib/supabaseClient.js';
 import { authenticateToken, AuthRequest } from '../middleware/auth.js';
 import { validateBody } from '../middleware/validation.js';
 
 const router = Router();
-const prisma = new PrismaClient();
 
 const bookingRequestSchema = z.object({
   quoteId: z.string().uuid(),
@@ -58,7 +57,7 @@ async function callApiGatewayBook(quoteRequest: any, rate: any): Promise<{
       throw new Error(`API Gateway returned ${response.status}`);
     }
 
-    const data = await response.json();
+    const data = await response.json() as any;
     return {
       bookingId: data.bookingId || data.id,
       confirmationNumber: data.confirmationNumber || data.confirmation,
@@ -107,7 +106,7 @@ async function createHubSpotBookingNote(
       return;
     }
 
-    const searchData = await searchResponse.json();
+    const searchData = await searchResponse.json() as any;
     if (!searchData.results || searchData.results.length === 0) {
       return;
     }
@@ -165,17 +164,26 @@ router.post('/book', authenticateToken, validateBody(bookingRequestSchema), asyn
     const { quoteId, selectedRateId } = req.body;
 
     // Verify quote request belongs to user's client
-    const quoteRequest = await prisma.quoteRequest.findFirst({
-      where: {
-        id: quoteId,
-        clientId,
-      },
-      include: {
-        rates: true,
-      },
-    });
+    const { data: quoteRequest, error: quoteError } = await supabaseAdmin
+      .from('quote_requests')
+      .select(`
+        id,
+        request_payload_json,
+        rates (
+          id,
+          rate_id,
+          carrier_name,
+          service_name,
+          transit_days,
+          total_cost,
+          currency
+        )
+      `)
+      .eq('id', quoteId)
+      .eq('client_id', clientId)
+      .single();
 
-    if (!quoteRequest) {
+    if (quoteError || !quoteRequest) {
       return res.status(404).json({
         requestId,
         errorCode: 'QUOTE_NOT_FOUND',
@@ -184,7 +192,8 @@ router.post('/book', authenticateToken, validateBody(bookingRequestSchema), asyn
     }
 
     // Find selected rate
-    const rate = quoteRequest.rates.find(r => r.id === selectedRateId);
+    const rates = Array.isArray(quoteRequest.rates) ? quoteRequest.rates : [];
+    const rate = rates.find((r: any) => r.id === selectedRateId);
     if (!rate) {
       return res.status(404).json({
         requestId,
@@ -196,7 +205,16 @@ router.post('/book', authenticateToken, validateBody(bookingRequestSchema), asyn
     // Call API Gateway
     let bookingResult;
     try {
-      bookingResult = await callApiGatewayBook(quoteRequest, rate);
+      bookingResult = await callApiGatewayBook(
+        { requestPayloadJson: quoteRequest.request_payload_json },
+        {
+          rateId: rate.rate_id,
+          carrierName: rate.carrier_name,
+          serviceName: rate.service_name,
+          totalCost: parseFloat(rate.total_cost.toString()),
+          currency: rate.currency,
+        }
+      );
     } catch (error) {
       console.error('Booking API error:', error);
       return res.status(502).json({
@@ -207,57 +225,80 @@ router.post('/book', authenticateToken, validateBody(bookingRequestSchema), asyn
     }
 
     // Save booking to database
-    const booking = await prisma.booking.create({
-      data: {
-        clientId,
-        userId,
-        quoteRequestId: quoteId,
-        rateId: selectedRateId,
-        bookingIdExternal: bookingResult.bookingId,
-        confirmationNumber: bookingResult.confirmationNumber,
+    const { data: booking, error: bookingError } = await supabaseAdmin
+      .from('bookings')
+      .insert({
+        client_id: clientId,
+        user_id: userId,
+        quote_request_id: quoteId,
+        rate_id: selectedRateId,
+        booking_id_external: bookingResult.bookingId,
+        confirmation_number: bookingResult.confirmationNumber,
         status: bookingResult.status,
-        rawJson: bookingResult.details as any,
-      },
-      include: {
-        rate: true,
-      },
-    });
+        raw_json: bookingResult.details as any,
+      })
+      .select(`
+        id,
+        booking_id_external,
+        confirmation_number,
+        status,
+        rates (
+          id,
+          carrier_name,
+          service_name,
+          transit_days,
+          total_cost,
+          currency
+        )
+      `)
+      .single();
+
+    if (bookingError || !booking) {
+      throw new Error('Failed to save booking');
+    }
 
     // Create HubSpot note if configured
-    const requestPayload = quoteRequest.requestPayloadJson as any;
+    const requestPayload = quoteRequest.request_payload_json as any;
     const contactEmail = requestPayload.hubspotContext?.email || requestPayload.contact?.email;
     if (contactEmail) {
+      const bookingRate = Array.isArray(booking.rates) ? booking.rates[0] : booking.rates;
       await createHubSpotBookingNote(
         contactEmail,
-        rate,
-        booking,
+        {
+          carrierName: bookingRate?.carrier_name || rate.carrier_name,
+          serviceName: bookingRate?.service_name || rate.service_name,
+          totalCost: bookingRate ? parseFloat(bookingRate.total_cost.toString()) : parseFloat(rate.total_cost.toString()),
+        },
+        {
+          bookingIdExternal: booking.booking_id_external,
+          confirmationNumber: booking.confirmation_number,
+        },
         requestPayload.hubspotContext?.dealId
       );
     }
 
-    await prisma.auditLog.create({
-      data: {
-        clientId,
-        userId,
-        action: 'CREATE_BOOKING',
-        metadataJson: {
-          bookingId: booking.id,
-          quoteRequestId: quoteId,
-          rateId: selectedRateId,
-        },
+    await supabaseAdmin.from('audit_logs').insert({
+      client_id: clientId,
+      user_id: userId,
+      action: 'CREATE_BOOKING',
+      metadata_json: {
+        bookingId: booking.id,
+        quoteRequestId: quoteId,
+        rateId: selectedRateId,
       },
     });
 
+    const bookingRate = Array.isArray(booking.rates) ? booking.rates[0] : booking.rates;
     res.json({
       requestId,
       bookingId: booking.id,
-      confirmationNumber: booking.confirmationNumber,
+      confirmationNumber: booking.confirmation_number,
       status: booking.status,
       rate: {
-        carrierName: booking.rate.carrierName,
-        serviceName: booking.rate.serviceName,
-        totalCost: booking.rate.totalCost,
-        currency: booking.rate.currency,
+        carrierName: bookingRate?.carrier_name || '',
+        serviceName: bookingRate?.service_name || '',
+        totalCost: bookingRate ? parseFloat(bookingRate.total_cost.toString()) : 0,
+        currency: bookingRate?.currency || 'USD',
       },
     });
   } catch (error) {

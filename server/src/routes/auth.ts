@@ -2,12 +2,11 @@ import { Router, Response } from 'express';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import { z } from 'zod';
-import { PrismaClient } from '@prisma/client';
+import { supabaseAdmin } from '../lib/supabaseClient.js';
 import { authenticateToken, requireAdmin, AuthRequest } from '../middleware/auth.js';
 import { validateBody } from '../middleware/validation.js';
 
 const router = Router();
-const prisma = new PrismaClient();
 
 const loginSchema = z.object({
   email: z.string().email(),
@@ -26,7 +25,7 @@ const registerSchema = z.object({
   clientName: z.string().min(1).optional(),
 });
 
-function generateToken(user: { id: string; clientId: string; email: string; role: string }) {
+function generateToken(user: { id: string; client_id: string; email: string; role: string }) {
   const secret = process.env.JWT_SECRET;
   if (!secret) {
     throw new Error('JWT_SECRET not configured');
@@ -34,7 +33,7 @@ function generateToken(user: { id: string; clientId: string; email: string; role
   return jwt.sign(
     {
       userId: user.id,
-      clientId: user.clientId,
+      clientId: user.client_id,
       email: user.email,
       role: user.role,
     },
@@ -57,12 +56,23 @@ router.post('/login', validateBody(loginSchema), async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    const user = await prisma.user.findUnique({
-      where: { email },
-      include: { client: true },
-    });
+    const { data: user, error: userError } = await supabaseAdmin
+      .from('users')
+      .select(`
+        id,
+        email,
+        password_hash,
+        role,
+        client_id,
+        clients (
+          id,
+          name
+        )
+      `)
+      .eq('email', email)
+      .single();
 
-    if (!user) {
+    if (userError || !user) {
       return res.status(401).json({
         requestId: crypto.randomUUID(),
         errorCode: 'INVALID_CREDENTIALS',
@@ -70,7 +80,7 @@ router.post('/login', validateBody(loginSchema), async (req, res) => {
       });
     }
 
-    const isValid = await bcrypt.compare(password, user.passwordHash);
+    const isValid = await bcrypt.compare(password, user.password_hash);
     if (!isValid) {
       return res.status(401).json({
         requestId: crypto.randomUUID(),
@@ -79,25 +89,29 @@ router.post('/login', validateBody(loginSchema), async (req, res) => {
       });
     }
 
-    const token = generateToken(user);
+    const token = generateToken({
+      id: user.id,
+      client_id: user.client_id,
+      email: user.email,
+      role: user.role,
+    });
     setTokenCookie(res, token);
 
-    await prisma.auditLog.create({
-      data: {
-        clientId: user.clientId,
-        userId: user.id,
-        action: 'LOGIN',
-        metadataJson: { email: user.email },
-      },
+    await supabaseAdmin.from('audit_logs').insert({
+      client_id: user.client_id,
+      user_id: user.id,
+      action: 'LOGIN',
+      metadata_json: { email: user.email },
     });
 
+    const client = Array.isArray(user.clients) ? user.clients[0] : user.clients;
     res.json({
       user: {
         id: user.id,
         email: user.email,
         role: user.role,
-        clientId: user.clientId,
-        clientName: user.client.name,
+        clientId: user.client_id,
+        clientName: client?.name || '',
       },
     });
   } catch (error) {
@@ -119,24 +133,22 @@ router.post('/logout', authenticateToken, async (req: AuthRequest, res) => {
 // GET /api/auth/me
 router.get('/me', authenticateToken, async (req: AuthRequest, res) => {
   try {
-    const user = await prisma.user.findUnique({
-      where: { id: req.user!.userId },
-      include: { client: true },
-      select: {
-        id: true,
-        email: true,
-        role: true,
-        clientId: true,
-        client: {
-          select: {
-            id: true,
-            name: true,
-          },
-        },
-      },
-    });
+    const { data: user, error: userError } = await supabaseAdmin
+      .from('users')
+      .select(`
+        id,
+        email,
+        role,
+        client_id,
+        clients (
+          id,
+          name
+        )
+      `)
+      .eq('id', req.user!.userId)
+      .single();
 
-    if (!user) {
+    if (userError || !user) {
       return res.status(404).json({
         requestId: crypto.randomUUID(),
         errorCode: 'USER_NOT_FOUND',
@@ -144,13 +156,14 @@ router.get('/me', authenticateToken, async (req: AuthRequest, res) => {
       });
     }
 
+    const client = Array.isArray(user.clients) ? user.clients[0] : user.clients;
     res.json({
       user: {
         id: user.id,
         email: user.email,
         role: user.role,
-        clientId: user.clientId,
-        clientName: user.client.name,
+        clientId: user.client_id,
+        clientName: client?.name || '',
       },
     });
   } catch (error) {
@@ -175,9 +188,11 @@ router.post(
       const clientId = req.user!.clientId;
 
       // Check if user already exists
-      const existing = await prisma.user.findUnique({
-        where: { email },
-      });
+      const { data: existing } = await supabaseAdmin
+        .from('users')
+        .select('id')
+        .eq('email', email)
+        .single();
 
       if (existing) {
         return res.status(400).json({
@@ -191,13 +206,11 @@ router.post(
       const inviteToken = crypto.randomUUID();
       // In a real app, store this in a separate Invite table with expiration
 
-      await prisma.auditLog.create({
-        data: {
-          clientId,
-          userId: req.user!.userId,
-          action: 'INVITE_USER',
-          metadataJson: { email, role, inviteToken },
-        },
+      await supabaseAdmin.from('audit_logs').insert({
+        client_id: clientId,
+        user_id: req.user!.userId,
+        action: 'INVITE_USER',
+        metadata_json: { email, role, inviteToken },
       });
 
       res.json({
@@ -223,9 +236,11 @@ router.post('/register', validateBody(registerSchema), async (req, res) => {
     const { email, password, inviteToken, clientName } = req.body;
 
     // Check if user already exists
-    const existing = await prisma.user.findUnique({
-      where: { email },
-    });
+    const { data: existing } = await supabaseAdmin
+      .from('users')
+      .select('id')
+      .eq('email', email)
+      .single();
 
     if (existing) {
       return res.status(400).json({
@@ -248,15 +263,27 @@ router.post('/register', validateBody(registerSchema), async (req, res) => {
         });
       }
       // Create new client
-      const client = await prisma.client.create({
-        data: { name: clientName },
-      });
+      const { data: client, error: clientError } = await supabaseAdmin
+        .from('clients')
+        .insert({ name: clientName })
+        .select('id')
+        .single();
+      
+      if (clientError || !client) {
+        throw new Error('Failed to create client');
+      }
       clientId = client.id;
     } else if (clientName) {
       // Create new client
-      const client = await prisma.client.create({
-        data: { name: clientName },
-      });
+      const { data: client, error: clientError } = await supabaseAdmin
+        .from('clients')
+        .insert({ name: clientName })
+        .select('id')
+        .single();
+      
+      if (clientError || !client) {
+        throw new Error('Failed to create client');
+      }
       clientId = client.id;
     } else {
       return res.status(400).json({
@@ -268,26 +295,46 @@ router.post('/register', validateBody(registerSchema), async (req, res) => {
 
     const passwordHash = await bcrypt.hash(password, 10);
 
-    const user = await prisma.user.create({
-      data: {
+    const { data: user, error: userError } = await supabaseAdmin
+      .from('users')
+      .insert({
         email,
-        passwordHash,
-        clientId,
+        password_hash: passwordHash,
+        client_id: clientId,
         role: 'ADMIN', // First user is admin
-      },
-      include: { client: true },
-    });
+      })
+      .select(`
+        id,
+        email,
+        role,
+        client_id,
+        clients (
+          id,
+          name
+        )
+      `)
+      .single();
 
-    const token = generateToken(user);
+    if (userError || !user) {
+      throw new Error('Failed to create user');
+    }
+
+    const token = generateToken({
+      id: user.id,
+      client_id: user.client_id,
+      email: user.email,
+      role: user.role,
+    });
     setTokenCookie(res, token);
 
+    const client = Array.isArray(user.clients) ? user.clients[0] : user.clients;
     res.status(201).json({
       user: {
         id: user.id,
         email: user.email,
         role: user.role,
-        clientId: user.clientId,
-        clientName: user.client.name,
+        clientId: user.client_id,
+        clientName: client?.name || '',
       },
     });
   } catch (error) {
