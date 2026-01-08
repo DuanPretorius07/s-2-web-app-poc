@@ -879,5 +879,6 @@ export default function RatesForm() {
         </div>
       </div>
     </div>
+    </div>
   );
 }

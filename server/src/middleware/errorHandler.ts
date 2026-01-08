@@ -6,9 +6,16 @@ export function errorHandler(
   res: Response,
   next: NextFunction
 ) {
-  console.error('Error:', err);
+  console.error('[ERROR HANDLER] Error:', err);
+  console.error('[ERROR HANDLER] Stack:', err.stack);
 
   const requestId = crypto.randomUUID();
+  
+  // Ensure response hasn't been sent
+  if (res.headersSent) {
+    console.error('[ERROR HANDLER] Response already sent, cannot send error response');
+    return next(err);
+  }
 
   if (err.name === 'ValidationError') {
     return res.status(400).json({

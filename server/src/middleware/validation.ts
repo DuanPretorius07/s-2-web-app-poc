@@ -8,6 +8,9 @@ export function validateBody(schema: z.ZodSchema) {
       next();
     } catch (error) {
       if (error instanceof z.ZodError) {
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'validation.ts:11',message:'Validation error',data:{errors:error.errors},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+        // #endregion
         return res.status(400).json({
           requestId: crypto.randomUUID(),
           errorCode: 'VALIDATION_ERROR',
