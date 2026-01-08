@@ -4,6 +4,7 @@ import { supabaseAdmin } from '../lib/supabaseClient.js';
 import { authenticateToken, AuthRequest } from '../middleware/auth.js';
 import { validateBody } from '../middleware/validation.js';
 import { RateRequest, NormalizedRate } from '../types.js';
+import { ship2PrimusRequest } from '../lib/ship2primusClient.js';
 
 const router = Router();
 
@@ -56,13 +57,12 @@ const rateRequestSchema = z.object({
   }).optional(),
 });
 
-async function callApiGatewayRates(request: RateRequest): Promise<NormalizedRate[]> {
-  const apiUrl = process.env.API_GATEWAY_RATES_URL;
-  const apiKey = process.env.PROXY_API_KEY;
+async function callShip2PrimusRates(request: RateRequest): Promise<NormalizedRate[]> {
+  const apiUrl = process.env.SHIP2PRIMUS_RATES_URL;
 
-  if (!apiUrl || !apiKey) {
+  if (!apiUrl) {
     // Mock response for development
-    console.warn('API_GATEWAY_RATES_URL or PROXY_API_KEY not configured, returning mock data');
+    console.warn('SHIP2PRIMUS_RATES_URL not configured, returning mock data');
     return [
       {
         rateId: 'mock-rate-1',
@@ -92,46 +92,42 @@ async function callApiGatewayRates(request: RateRequest): Promise<NormalizedRate
   }
 
   try {
-    const response = await fetch(apiUrl, {
+    const data = await ship2PrimusRequest<any>(apiUrl, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`,
-      },
       body: JSON.stringify(request),
     });
-
-    if (!response.ok) {
-      throw new Error(`API Gateway returned ${response.status}`);
-    }
-
-    const data = await response.json() as any;
     
-    // Normalize the response - adjust this based on your API Gateway response format
+    // Normalize the response - adjust this based on Ship2Primus API response format
     if (Array.isArray(data.rates)) {
       return data.rates.map((rate: any) => ({
-        rateId: rate.id || rate.rateId,
-        carrierName: rate.carrier || rate.carrierName,
-        serviceName: rate.service || rate.serviceName,
+        rateId: rate.id || rate.rateId || rate.rate_id,
+        carrierName: rate.carrier || rate.carrierName || rate.carrier_name,
+        serviceName: rate.service || rate.serviceName || rate.service_name,
         transitDays: rate.transitDays || rate.transit_days,
-        totalCost: rate.cost || rate.totalCost || rate.total,
+        totalCost: rate.cost || rate.totalCost || rate.total_cost || rate.total,
         currency: rate.currency || 'USD',
         rawJson: rate,
       }));
     }
 
-    // Fallback normalization
-    return [{
-      rateId: data.rateId,
-      carrierName: data.carrierName || 'Unknown',
-      serviceName: data.serviceName || 'Standard',
-      transitDays: data.transitDays,
-      totalCost: data.totalCost || data.cost,
-      currency: data.currency || 'USD',
-      rawJson: data,
-    }];
+    // If response is a single rate object
+    if (data.rateId || data.carrierName) {
+      return [{
+        rateId: data.rateId || data.rate_id || data.id,
+        carrierName: data.carrierName || data.carrier_name || data.carrier || 'Unknown',
+        serviceName: data.serviceName || data.service_name || data.service || 'Standard',
+        transitDays: data.transitDays || data.transit_days,
+        totalCost: data.totalCost || data.total_cost || data.cost || data.total,
+        currency: data.currency || 'USD',
+        rawJson: data,
+      }];
+    }
+
+    // Fallback: try to extract from root level or return mock
+    console.warn('Unexpected Ship2Primus rates response format:', data);
+    return [];
   } catch (error) {
-    console.error('API Gateway rates error:', error);
+    console.error('Ship2Primus rates API error:', error);
     throw error;
   }
 }
@@ -242,10 +238,10 @@ router.post('/rates', authenticateToken, validateBody(rateRequestSchema), async 
       throw new Error('Failed to save quote request');
     }
 
-    // Call API Gateway
+    // Call Ship2Primus API
     let rates: NormalizedRate[];
     try {
-      rates = await callApiGatewayRates(requestPayload);
+      rates = await callShip2PrimusRates(requestPayload);
     } catch (error) {
       console.error('Rates API error:', error);
       return res.status(502).json({

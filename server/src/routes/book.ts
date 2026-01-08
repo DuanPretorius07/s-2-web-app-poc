@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { supabaseAdmin } from '../lib/supabaseClient.js';
 import { authenticateToken, AuthRequest } from '../middleware/auth.js';
 import { validateBody } from '../middleware/validation.js';
+import { ship2PrimusRequest } from '../lib/ship2primusClient.js';
 
 const router = Router();
 
@@ -11,18 +12,17 @@ const bookingRequestSchema = z.object({
   selectedRateId: z.string().uuid(),
 });
 
-async function callApiGatewayBook(quoteRequest: any, rate: any): Promise<{
+async function callShip2PrimusBook(quoteRequest: any, rate: any): Promise<{
   bookingId?: string;
   confirmationNumber?: string;
   status: string;
   details?: any;
 }> {
-  const apiUrl = process.env.API_GATEWAY_BOOK_URL;
-  const apiKey = process.env.PROXY_API_KEY;
+  const apiUrl = process.env.SHIP2PRIMUS_BOOK_URL;
 
-  if (!apiUrl || !apiKey) {
+  if (!apiUrl) {
     // Mock response for development
-    console.warn('API_GATEWAY_BOOK_URL or PROXY_API_KEY not configured, returning mock data');
+    console.warn('SHIP2PRIMUS_BOOK_URL not configured, returning mock data');
     return {
       bookingId: `mock-booking-${Date.now()}`,
       confirmationNumber: `CONF-${Math.random().toString(36).substring(2, 11).toUpperCase()}`,
@@ -35,12 +35,8 @@ async function callApiGatewayBook(quoteRequest: any, rate: any): Promise<{
   }
 
   try {
-    const response = await fetch(apiUrl, {
+    const data = await ship2PrimusRequest<any>(apiUrl, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`,
-      },
       body: JSON.stringify({
         quoteRequest: quoteRequest.requestPayloadJson,
         rate: {
@@ -53,19 +49,14 @@ async function callApiGatewayBook(quoteRequest: any, rate: any): Promise<{
       }),
     });
 
-    if (!response.ok) {
-      throw new Error(`API Gateway returned ${response.status}`);
-    }
-
-    const data = await response.json() as any;
     return {
-      bookingId: data.bookingId || data.id,
-      confirmationNumber: data.confirmationNumber || data.confirmation,
+      bookingId: data.bookingId || data.booking_id || data.id,
+      confirmationNumber: data.confirmationNumber || data.confirmation_number || data.confirmation,
       status: data.status || 'confirmed',
       details: data,
     };
   } catch (error) {
-    console.error('API Gateway book error:', error);
+    console.error('Ship2Primus booking API error:', error);
     throw error;
   }
 }
@@ -202,10 +193,10 @@ router.post('/book', authenticateToken, validateBody(bookingRequestSchema), asyn
       });
     }
 
-    // Call API Gateway
+    // Call Ship2Primus API
     let bookingResult;
     try {
-      bookingResult = await callApiGatewayBook(
+      bookingResult = await callShip2PrimusBook(
         { requestPayloadJson: quoteRequest.request_payload_json },
         {
           rateId: rate.rate_id,
