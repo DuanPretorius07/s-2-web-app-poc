@@ -7,9 +7,19 @@ import { ship2PrimusRequest } from '../lib/ship2primusClient.js';
 
 const router = Router();
 
+// Accept either quoteId/selectedRateId (existing flow) or rate data directly (POC flow)
 const bookingRequestSchema = z.object({
-  quoteId: z.string().uuid(),
-  selectedRateId: z.string().uuid(),
+  quoteId: z.string().uuid().optional(),
+  selectedRateId: z.string().uuid().optional(),
+  rate: z.object({
+    rateId: z.string(),
+    carrierName: z.string(),
+    serviceName: z.string(),
+    totalCost: z.number(),
+    currency: z.string().optional().default('USD'),
+  }).optional(),
+}).refine((data) => (data.quoteId && data.selectedRateId) || data.rate, {
+  message: "Either (quoteId and selectedRateId) or rate must be provided",
 });
 
 async function callShip2PrimusBook(quoteRequest: any, rate: any): Promise<{
@@ -146,50 +156,74 @@ async function createHubSpotBookingNote(
 }
 
 // POST /api/book
+// Accepts either quoteId/selectedRateId (database flow) or rate data directly (POC flow)
 router.post('/book', authenticateToken, validateBody(bookingRequestSchema), async (req: AuthRequest, res) => {
   const requestId = crypto.randomUUID();
 
   try {
     const userId = req.user!.userId;
     const clientId = req.user!.clientId;
-    const { quoteId, selectedRateId } = req.body;
+    const { quoteId, selectedRateId, rate } = req.body;
 
-    // Verify quote request belongs to user's client
-    const { data: quoteRequest, error: quoteError } = await supabaseAdmin
-      .from('quote_requests')
-      .select(`
-        id,
-        request_payload_json,
-        rates (
+    let rateData: any;
+    let originalRequestPayload: any = null;
+
+    // Handle two flows: database-based (quoteId) or direct rate (POC)
+    if (quoteId && selectedRateId) {
+      // Existing database flow: fetch quote and rate from database
+      const { data: quoteRequest, error: quoteError } = await supabaseAdmin
+        .from('quote_requests')
+        .select(`
           id,
-          rate_id,
-          carrier_name,
-          service_name,
-          transit_days,
-          total_cost,
-          currency
-        )
-      `)
-      .eq('id', quoteId)
-      .eq('client_id', clientId)
-      .single();
+          request_payload_json,
+          rates (
+            id,
+            rate_id,
+            carrier_name,
+            service_name,
+            transit_days,
+            total_cost,
+            currency
+          )
+        `)
+        .eq('id', quoteId)
+        .eq('client_id', clientId)
+        .single();
 
-    if (quoteError || !quoteRequest) {
-      return res.status(404).json({
-        requestId,
-        errorCode: 'QUOTE_NOT_FOUND',
-        message: 'Quote request not found',
-      });
-    }
+      if (quoteError || !quoteRequest) {
+        return res.status(404).json({
+          requestId,
+          errorCode: 'QUOTE_NOT_FOUND',
+          message: 'Quote request not found',
+        });
+      }
 
-    // Find selected rate
-    const rates = Array.isArray(quoteRequest.rates) ? quoteRequest.rates : [];
-    const rate = rates.find((r: any) => r.id === selectedRateId);
-    if (!rate) {
-      return res.status(404).json({
+      const rates = Array.isArray(quoteRequest.rates) ? quoteRequest.rates : [];
+      const dbRate = rates.find((r: any) => r.id === selectedRateId);
+      if (!dbRate) {
+        return res.status(404).json({
+          requestId,
+          errorCode: 'RATE_NOT_FOUND',
+          message: 'Selected rate not found',
+        });
+      }
+
+      rateData = {
+        rateId: dbRate.rate_id,
+        carrierName: dbRate.carrier_name,
+        serviceName: dbRate.service_name,
+        totalCost: parseFloat(dbRate.total_cost.toString()),
+        currency: dbRate.currency,
+      };
+      originalRequestPayload = quoteRequest.request_payload_json;
+    } else if (rate) {
+      // POC flow: use rate data directly
+      rateData = rate;
+    } else {
+      return res.status(400).json({
         requestId,
-        errorCode: 'RATE_NOT_FOUND',
-        message: 'Selected rate not found',
+        errorCode: 'INVALID_REQUEST',
+        message: 'Either (quoteId and selectedRateId) or rate must be provided',
       });
     }
 
@@ -197,107 +231,77 @@ router.post('/book', authenticateToken, validateBody(bookingRequestSchema), asyn
     let bookingResult;
     try {
       bookingResult = await callShip2PrimusBook(
-        { requestPayloadJson: quoteRequest.request_payload_json },
-        {
-          rateId: rate.rate_id,
-          carrierName: rate.carrier_name,
-          serviceName: rate.service_name,
-          totalCost: parseFloat(rate.total_cost.toString()),
-          currency: rate.currency,
-        }
+        { requestPayloadJson: originalRequestPayload },
+        rateData
       );
-    } catch (error) {
-      console.error('Booking API error:', error);
+    } catch (error: any) {
+      console.error('[BOOK] Booking API error:', error);
       return res.status(502).json({
         requestId,
         errorCode: 'UPSTREAM_ERROR',
         message: 'Failed to create booking with shipping provider',
+        details: process.env.NODE_ENV === 'development' ? error.message : undefined,
       });
     }
 
-    // Save booking to database
-    const { data: booking, error: bookingError } = await supabaseAdmin
-      .from('bookings')
-      .insert({
-        client_id: clientId,
-        user_id: userId,
-        quote_request_id: quoteId,
-        rate_id: selectedRateId,
-        booking_id_external: bookingResult.bookingId,
-        confirmation_number: bookingResult.confirmationNumber,
-        status: bookingResult.status,
-        raw_json: bookingResult.details as any,
-      })
-      .select(`
-        id,
-        booking_id_external,
-        confirmation_number,
-        status,
-        rates (
-          id,
-          carrier_name,
-          service_name,
-          transit_days,
-          total_cost,
-          currency
-        )
-      `)
-      .single();
+    // Save booking to database (optional - try to save if quoteId exists)
+    let savedBooking: any = null;
+    if (quoteId && selectedRateId) {
+      try {
+        const { data: booking, error: bookingError } = await supabaseAdmin
+          .from('bookings')
+          .insert({
+            client_id: clientId,
+            user_id: userId,
+            quote_request_id: quoteId,
+            rate_id: selectedRateId,
+            booking_id_external: bookingResult.bookingId,
+            confirmation_number: bookingResult.confirmationNumber,
+            status: bookingResult.status,
+            raw_json: bookingResult.details as any,
+          })
+          .select('id, booking_id_external, confirmation_number, status')
+          .single();
 
-    if (bookingError || !booking) {
-      throw new Error('Failed to save booking');
+        if (!bookingError && booking) {
+          savedBooking = booking;
+          
+          // Audit log
+          await supabaseAdmin.from('audit_logs').insert({
+            client_id: clientId,
+            user_id: userId,
+            action: 'CREATE_BOOKING',
+            metadata_json: {
+              bookingId: booking.id,
+              quoteRequestId: quoteId,
+              rateId: selectedRateId,
+            },
+          });
+        }
+      } catch (dbError) {
+        console.warn('[BOOK] Database save failed (non-critical):', dbError);
+      }
     }
 
-    // Create HubSpot note if configured
-    const requestPayload = quoteRequest.request_payload_json as any;
-    const contactEmail = requestPayload.hubspotContext?.email || requestPayload.contact?.email;
-    if (contactEmail) {
-      const bookingRate = Array.isArray(booking.rates) ? booking.rates[0] : booking.rates;
-      await createHubSpotBookingNote(
-        contactEmail,
-        {
-          carrierName: bookingRate?.carrier_name || rate.carrier_name,
-          serviceName: bookingRate?.service_name || rate.service_name,
-          totalCost: bookingRate ? parseFloat(bookingRate.total_cost.toString()) : parseFloat(rate.total_cost.toString()),
-        },
-        {
-          bookingIdExternal: booking.booking_id_external,
-          confirmationNumber: booking.confirmation_number,
-        },
-        requestPayload.hubspotContext?.dealId
-      );
-    }
-
-    await supabaseAdmin.from('audit_logs').insert({
-      client_id: clientId,
-      user_id: userId,
-      action: 'CREATE_BOOKING',
-      metadata_json: {
-        bookingId: booking.id,
-        quoteRequestId: quoteId,
-        rateId: selectedRateId,
-      },
-    });
-
-    const bookingRate = Array.isArray(booking.rates) ? booking.rates[0] : booking.rates;
     res.json({
       requestId,
-      bookingId: booking.id,
-      confirmationNumber: booking.confirmation_number,
-      status: booking.status,
+      bookingId: savedBooking?.id || bookingResult.bookingId,
+      confirmationNumber: bookingResult.confirmationNumber,
+      status: bookingResult.status,
       rate: {
-        carrierName: bookingRate?.carrier_name || '',
-        serviceName: bookingRate?.service_name || '',
-        totalCost: bookingRate ? parseFloat(bookingRate.total_cost.toString()) : 0,
-        currency: bookingRate?.currency || 'USD',
+        carrierName: rateData.carrierName,
+        serviceName: rateData.serviceName,
+        totalCost: rateData.totalCost,
+        currency: rateData.currency || 'USD',
       },
     });
-  } catch (error) {
-    console.error('Book endpoint error:', error);
+  } catch (error: any) {
+    console.error('[BOOK] Endpoint error:', error);
     res.status(500).json({
       requestId,
       errorCode: 'INTERNAL_ERROR',
       message: 'Failed to process booking',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined,
     });
   }
 });

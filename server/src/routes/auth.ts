@@ -124,12 +124,12 @@ router.post('/login', validateBody(loginSchema), async (req, res) => {
     
     // Ensure response hasn't been sent
     if (!res.headersSent) {
-      res.status(500).json({
-        requestId: crypto.randomUUID(),
-        errorCode: 'INTERNAL_ERROR',
+    res.status(500).json({
+      requestId: crypto.randomUUID(),
+      errorCode: 'INTERNAL_ERROR',
         message: error?.message || 'Login failed',
         details: process.env.NODE_ENV === 'development' ? error?.stack : undefined,
-      });
+    });
     } else {
       console.error('[LOGIN] Response already sent, cannot send error response');
     }
@@ -352,7 +352,7 @@ router.post('/register', validateBody(registerSchema), async (req, res) => {
     // #region agent log
     fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'auth.ts:318',message:'User creation result',data:{hasUser:!!user,userError:userError?.message,userId:user?.id},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
     // #endregion
-    
+
     if (userError || !user) {
       // #region agent log
       fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'auth.ts:321',message:'User creation failed',data:{userError:userError?.message,details:userError},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
@@ -390,12 +390,12 @@ router.post('/register', validateBody(registerSchema), async (req, res) => {
     
     // Ensure response hasn't been sent
     if (!res.headersSent) {
-      res.status(500).json({
-        requestId: crypto.randomUUID(),
-        errorCode: 'INTERNAL_ERROR',
+    res.status(500).json({
+      requestId: crypto.randomUUID(),
+      errorCode: 'INTERNAL_ERROR',
         message: error?.message || 'Registration failed',
         details: process.env.NODE_ENV === 'development' ? error?.stack : undefined,
-      });
+    });
     } else {
       console.error('[REGISTER] Response already sent, cannot send error response');
     }

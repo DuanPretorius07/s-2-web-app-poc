@@ -65,19 +65,37 @@ export default function QuoteDetail() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'QuoteDetail.tsx:67',message:'useEffect triggered',data:{quoteId},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+    // #endregion
+    setLoading(true);
+    setQuote(null);
     loadQuote();
   }, [quoteId]);
 
   const loadQuote = async () => {
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'QuoteDetail.tsx:74',message:'loadQuote entry',data:{quoteId},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+    // #endregion
     try {
       const response = await fetch(`/api/history/quotes/${quoteId}`, {
         credentials: 'include',
       });
       if (response.ok) {
         const data = await response.json();
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'QuoteDetail.tsx:81',message:'Quote data received',data:{hasQuote:!!data,hasContact:!!data?.contact,hasOrigin:!!data?.origin,hasShipment:!!data?.shipment,hasAccessorials:!!data?.accessorials,hasRates:Array.isArray(data?.rates),hasBookings:Array.isArray(data?.bookings)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+        // #endregion
         setQuote(data);
+      } else {
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'QuoteDetail.tsx:84',message:'Quote fetch failed',data:{status:response.status,statusText:response.statusText},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+        // #endregion
       }
     } catch (error) {
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'QuoteDetail.tsx:87',message:'loadQuote error',data:{error:String(error),stack:error instanceof Error?error.stack:undefined},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+      // #endregion
       console.error('Failed to load quote:', error);
     } finally {
       setLoading(false);
@@ -276,14 +294,14 @@ export default function QuoteDetail() {
               <div>
                 <h2 className="text-lg font-medium text-gray-900 mb-3">Accessorials</h2>
                 <div className="grid grid-cols-2 gap-2">
-                  {Object.entries(quote.accessorials)
+                  {quote.accessorials && Object.entries(quote.accessorials)
                     .filter(([_, value]) => value)
                     .map(([key, _]) => (
                       <div key={key} className="text-sm text-gray-900">
                         • {key.replace(/([A-Z])/g, ' $1').trim()}
                       </div>
                     ))}
-                  {Object.values(quote.accessorials).every((v) => !v) && (
+                  {(!quote.accessorials || Object.values(quote.accessorials).every((v) => !v)) && (
                     <div className="text-sm text-gray-500">None</div>
                   )}
                 </div>

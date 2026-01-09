@@ -94,13 +94,47 @@ router.get('/quotes', authenticateToken, validateQuery(historyFiltersSchema), as
       quotes: filteredQuotes.map((quote: any) => {
         const payload = quote.request_payload_json;
         const rates = Array.isArray(quote.rates) ? quote.rates : [];
+        
+        // Handle both old and new payload structures
+        let contact, origin, destination, shipment;
+        if (payload?.contact) {
+          // Old structure
+          contact = payload.contact;
+          origin = payload.origin;
+          destination = payload.destination;
+          shipment = payload.shipment;
+        } else if (payload?.originCity !== undefined || payload?.freightInfo) {
+          // New structure - transform for frontend
+          const freightInfo = Array.isArray(payload.freightInfo) ? payload.freightInfo[0] : {};
+          contact = { fullName: '', email: '', phone: '' };
+          origin = {
+            countryCode: payload.originCountry || 'US',
+            postalCode: payload.originZipcode || '',
+          };
+          destination = {
+            countryCode: payload.destinationCountry || 'US',
+            postalCode: payload.destinationZipcode || '',
+          };
+          shipment = {
+            pieces: freightInfo.qty || 1,
+            totalWeight: freightInfo.weight || 0,
+            weightUnit: freightInfo.weightType === 'lbs' ? 'LB' : 'KG',
+          };
+        } else {
+          // Fallback
+          contact = { fullName: '', email: '' };
+          origin = { countryCode: 'US', postalCode: '' };
+          destination = { countryCode: 'US', postalCode: '' };
+          shipment = { pieces: 1, totalWeight: 0, weightUnit: 'LB' };
+        }
+        
         return {
           id: quote.id,
           createdAt: quote.created_at,
-          contact: payload.contact,
-          origin: payload.origin,
-          destination: payload.destination,
-          shipment: payload.shipment,
+          contact,
+          origin,
+          destination,
+          shipment,
           ratesCount: rates.length,
           rates: rates.map((r: any) => ({
             id: r.id,
@@ -182,16 +216,80 @@ router.get('/quotes/:quoteId', authenticateToken, async (req: AuthRequest, res) 
     }
 
     const payload = quote.request_payload_json;
+    
+    // #region agent log
+    console.log('[QUOTE_DETAIL] Payload structure:', {
+      hasContact: !!payload?.contact,
+      hasOrigin: !!payload?.origin,
+      hasOriginCity: !!payload?.originCity,
+      hasFreightInfo: Array.isArray(payload?.freightInfo),
+      payloadKeys: payload ? Object.keys(payload) : [],
+    });
+    // #endregion
+    
+    // Handle both old payload structure (contact, origin, destination, shipment) 
+    // and new payload structure (originCity, originState, freightInfo)
+    let contact, origin, destination, shipment, accessorials;
+    
+    if (payload.contact) {
+      // Old structure
+      contact = payload.contact;
+      origin = payload.origin;
+      destination = payload.destination;
+      shipment = payload.shipment;
+      accessorials = payload.accessorials || {};
+    } else if (payload.originCity !== undefined || payload.freightInfo) {
+      // New structure - transform to old format for frontend compatibility
+      const freightInfo = Array.isArray(payload.freightInfo) ? payload.freightInfo[0] : {};
+      contact = {
+        fullName: '',
+        email: '',
+        phone: '',
+      };
+      origin = {
+        countryCode: payload.originCountry || 'US',
+        postalCode: payload.originZipcode || '',
+        state: payload.originState || '',
+        city: payload.originCity || '',
+      };
+      destination = {
+        countryCode: payload.destinationCountry || 'US',
+        postalCode: payload.destinationZipcode || '',
+        state: payload.destinationState || '',
+        city: payload.destinationCity || '',
+      };
+      shipment = {
+        shipDate: payload.pickupDate || '',
+        pieces: freightInfo.qty || 1,
+        totalWeight: freightInfo.weight || 0,
+        weightUnit: freightInfo.weightType === 'lbs' ? 'LB' : 'KG',
+        dimensions: (freightInfo.length && freightInfo.width && freightInfo.height) ? {
+          length: freightInfo.length,
+          width: freightInfo.width,
+          height: freightInfo.height,
+          dimUnit: 'IN',
+        } : undefined,
+      };
+      accessorials = {};
+    } else {
+      // Fallback - empty structure
+      contact = { fullName: '', email: '', phone: '' };
+      origin = { countryCode: 'US', postalCode: '', state: '', city: '' };
+      destination = { countryCode: 'US', postalCode: '', state: '', city: '' };
+      shipment = { pieces: 1, totalWeight: 0, weightUnit: 'LB' };
+      accessorials = {};
+    }
+    
     const rates = Array.isArray(quote.rates) ? quote.rates : [];
     const bookings = Array.isArray(quote.bookings) ? quote.bookings : [];
     res.json({
       id: quote.id,
       createdAt: quote.created_at,
-      contact: payload.contact,
-      origin: payload.origin,
-      destination: payload.destination,
-      shipment: payload.shipment,
-      accessorials: payload.accessorials,
+      contact,
+      origin,
+      destination,
+      shipment,
+      accessorials,
       rates: rates.map((r: any) => ({
         id: r.id,
         rateId: r.rate_id,
@@ -385,6 +483,54 @@ router.get('/bookings/:bookingId', authenticateToken, async (req: AuthRequest, r
     const quoteRequest = Array.isArray(booking.quote_requests) ? booking.quote_requests[0] : booking.quote_requests;
     const payload = quoteRequest?.request_payload_json;
     const rate = Array.isArray(booking.rates) ? booking.rates[0] : booking.rates;
+    
+    // Handle both old and new payload structures for quoteRequest
+    let contact, origin, destination, shipment, accessorials;
+    if (payload?.contact) {
+      // Old structure
+      contact = payload.contact;
+      origin = payload.origin;
+      destination = payload.destination;
+      shipment = payload.shipment;
+      accessorials = payload.accessorials || {};
+    } else if (payload?.originCity !== undefined || payload?.freightInfo) {
+      // New structure - transform to old format
+      const freightInfo = Array.isArray(payload.freightInfo) ? payload.freightInfo[0] : {};
+      contact = { fullName: '', email: '', phone: '' };
+      origin = {
+        countryCode: payload.originCountry || 'US',
+        postalCode: payload.originZipcode || '',
+        state: payload.originState || '',
+        city: payload.originCity || '',
+      };
+      destination = {
+        countryCode: payload.destinationCountry || 'US',
+        postalCode: payload.destinationZipcode || '',
+        state: payload.destinationState || '',
+        city: payload.destinationCity || '',
+      };
+      shipment = {
+        shipDate: payload.pickupDate || '',
+        pieces: freightInfo.qty || 1,
+        totalWeight: freightInfo.weight || 0,
+        weightUnit: freightInfo.weightType === 'lbs' ? 'LB' : 'KG',
+        dimensions: (freightInfo.length && freightInfo.width && freightInfo.height) ? {
+          length: freightInfo.length,
+          width: freightInfo.width,
+          height: freightInfo.height,
+          dimUnit: 'IN',
+        } : undefined,
+      };
+      accessorials = {};
+    } else {
+      // Fallback
+      contact = { fullName: '', email: '', phone: '' };
+      origin = { countryCode: 'US', postalCode: '', state: '', city: '' };
+      destination = { countryCode: 'US', postalCode: '', state: '', city: '' };
+      shipment = { pieces: 1, totalWeight: 0, weightUnit: 'LB' };
+      accessorials = {};
+    }
+    
     res.json({
       id: booking.id,
       bookingIdExternal: booking.booking_id_external,
@@ -401,11 +547,11 @@ router.get('/bookings/:bookingId', authenticateToken, async (req: AuthRequest, r
       },
       quoteRequest: {
         id: quoteRequest?.id || '',
-        contact: payload?.contact,
-        origin: payload?.origin,
-        destination: payload?.destination,
-        shipment: payload?.shipment,
-        accessorials: payload?.accessorials,
+        contact,
+        origin,
+        destination,
+        shipment,
+        accessorials,
       },
     });
   } catch (error) {

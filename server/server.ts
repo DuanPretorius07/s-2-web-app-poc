@@ -191,7 +191,7 @@ app.use(errorHandler);
 // Export app for Vercel serverless functions
 // Only listen if not in Vercel environment
 if (process.env.VERCEL !== '1') {
-  app.listen(PORT, () => {
+app.listen(PORT, () => {
     console.log(`✅ Server running on port ${PORT}`);
     console.log(`   Health check: http://localhost:${PORT}/health`);
     console.log(`   Supabase test: http://localhost:${PORT}/api/test/supabase`);
