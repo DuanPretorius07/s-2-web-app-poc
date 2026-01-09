@@ -4,7 +4,9 @@ import path from 'path';
 
 // Load .env if not already loaded and not in Vercel (Vercel provides env vars directly)
 // Skip .env loading in Vercel environment where env vars are provided directly
-if (process.env.VERCEL !== '1' && !process.env.NEXT_PUBLIC_SUPABASE_URL && !process.env.SUPABASE_URL) {
+// Vercel sets VERCEL env var, check for it (can be '1' or truthy)
+const isVercel = process.env.VERCEL === '1' || process.env.VERCEL === 'true' || !!process.env.VERCEL;
+if (!isVercel && !process.env.NEXT_PUBLIC_SUPABASE_URL && !process.env.SUPABASE_URL) {
   const envPaths = [
     path.join(process.cwd(), '.env'),
     path.join(process.cwd(), '..', '.env'),
@@ -33,8 +35,9 @@ if (process.env.NODE_ENV !== 'production') {
 }
 
 if (!supabaseUrl) {
-  const errorMsg = process.env.VERCEL === '1'
-    ? 'Missing Supabase URL environment variable: NEXT_PUBLIC_SUPABASE_URL or SUPABASE_URL. Please set this in Vercel project settings.'
+  const isVercel = process.env.VERCEL === '1' || process.env.VERCEL === 'true' || !!process.env.VERCEL;
+  const errorMsg = isVercel
+    ? 'Missing Supabase URL environment variable: NEXT_PUBLIC_SUPABASE_URL or SUPABASE_URL. Please set this in Vercel project settings → Environment Variables.'
     : 'Missing Supabase URL environment variable: NEXT_PUBLIC_SUPABASE_URL or SUPABASE_URL. Please set this in server/.env';
   console.error('[SUPABASE] ❌ Missing Supabase URL!');
   console.error('[SUPABASE]', errorMsg);
@@ -46,8 +49,9 @@ if (!supabaseUrl) {
 const supabaseKey = supabaseServiceRoleKey || supabaseAnonKey;
 
 if (!supabaseKey) {
-  const errorMsg = process.env.VERCEL === '1'
-    ? 'Missing Supabase API key: SUPABASE_SERVICE_ROLE_KEY or NEXT_PUBLIC_SUPABASE_ANON_KEY. Please set this in Vercel project settings.'
+  const isVercel = process.env.VERCEL === '1' || process.env.VERCEL === 'true' || !!process.env.VERCEL;
+  const errorMsg = isVercel
+    ? 'Missing Supabase API key: SUPABASE_SERVICE_ROLE_KEY or NEXT_PUBLIC_SUPABASE_ANON_KEY. Please set this in Vercel project settings → Environment Variables.'
     : 'Missing Supabase API key: SUPABASE_SERVICE_ROLE_KEY or NEXT_PUBLIC_SUPABASE_ANON_KEY. Please set this in server/.env';
   console.error('[SUPABASE] ❌ Missing Supabase API key!');
   console.error('[SUPABASE]', errorMsg);

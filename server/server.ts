@@ -57,21 +57,19 @@ console.log('[SERVER] Environment check:', {
 });
 
 // Now import everything else (supabaseClient will use the loaded env vars)
+// In Vercel, env vars are available immediately, so static imports are fine
 import express from 'express';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import rateLimit from 'express-rate-limit';
 import { errorHandler } from './src/middleware/errorHandler.js';
+import authRoutes from './src/routes/auth.js';
+import ratesRoutes from './src/routes/rates.js';
+import bookRoutes from './src/routes/book.js';
+import historyRoutes from './src/routes/history.js';
 
 const app = express();
 const PORT = process.env.PORT || 5000;
-
-// Import routes AFTER env vars are loaded (using dynamic imports to ensure order)
-// This prevents supabaseClient from being initialized before env vars are available
-const authRoutes = (await import('./src/routes/auth.js')).default;
-const ratesRoutes = (await import('./src/routes/rates.js')).default;
-const bookRoutes = (await import('./src/routes/book.js')).default;
-const historyRoutes = (await import('./src/routes/history.js')).default;
 
 
 // CORS configuration
@@ -129,9 +127,10 @@ app.get('/api/test/supabase', async (req, res) => {
       supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL?.substring(0, 40) + '...' || 'NOT SET',
     });
     
-    console.log('[SUPABASE TEST] Importing Supabase client...');
+    console.log('[SUPABASE TEST] Using Supabase client...');
+    // Import at top level - env vars are already available in Vercel
     const { supabaseAdmin } = await import('./src/lib/supabaseClient.js');
-    console.log('[SUPABASE TEST] Client imported successfully');
+    console.log('[SUPABASE TEST] Client ready');
     
     // Try to query a simple table (clients table should exist)
     const { data, error, count } = await supabaseAdmin
