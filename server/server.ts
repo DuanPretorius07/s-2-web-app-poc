@@ -6,44 +6,46 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Load .env - try multiple paths since tsx runs from server directory
-console.log('[SERVER] Loading .env file...');
-console.log('[SERVER] process.cwd():', process.cwd());
-console.log('[SERVER] __dirname:', __dirname);
+// Load .env - skip in Vercel environment where env vars are provided directly
+if (process.env.VERCEL !== '1') {
+  console.log('[SERVER] Loading .env file...');
+  console.log('[SERVER] process.cwd():', process.cwd());
+  console.log('[SERVER] __dirname:', __dirname);
 
-const envPaths = [
-  path.join(process.cwd(), '.env'),           // server/.env (when running from server dir)
-  path.join(__dirname, '.env'),                // dist/.env (production)
-  path.join(process.cwd(), '..', 'server', '.env'), // from root (if running from root)
-];
+  const envPaths = [
+    path.join(process.cwd(), '.env'),           // server/.env (when running from server dir)
+    path.join(__dirname, '.env'),                // dist/.env (production)
+    path.join(process.cwd(), '..', 'server', '.env'), // from root (if running from root)
+  ];
 
-console.log('[SERVER] Trying .env paths:', envPaths);
+  console.log('[SERVER] Trying .env paths:', envPaths);
 
-let envLoaded = false;
-for (const envPath of envPaths) {
-  console.log(`[SERVER] Attempting: ${envPath}`);
-  const result = dotenv.config({ path: envPath });
-  if (!result.error) {
-    console.log(`[SERVER] ✓ Loaded .env from: ${envPath}`);
-    envLoaded = true;
-    break;
-  } else {
-    console.log(`[SERVER] ✗ Failed: ${result.error.message}`);
+  let envLoaded = false;
+  for (const envPath of envPaths) {
+    console.log(`[SERVER] Attempting: ${envPath}`);
+    const result = dotenv.config({ path: envPath });
+    if (!result.error) {
+      console.log(`[SERVER] ✓ Loaded .env from: ${envPath}`);
+      envLoaded = true;
+      break;
+    } else {
+      console.log(`[SERVER] ✗ Failed: ${result.error.message}`);
+    }
   }
-}
 
-if (!envLoaded) {
-  // Last resort: try default location
-  const defaultResult = dotenv.config();
-  if (!defaultResult.error) {
-    console.log('[SERVER] ✓ Loaded .env from default location');
-    envLoaded = true;
-  } else {
-    console.error('[SERVER] ❌ Could not find .env file!');
-    console.error('[SERVER] Tried paths:', envPaths);
-    console.error('[SERVER] Current directory:', process.cwd());
-    console.error('[SERVER] __dirname:', __dirname);
+  if (!envLoaded) {
+    // Last resort: try default location
+    const defaultResult = dotenv.config();
+    if (!defaultResult.error) {
+      console.log('[SERVER] ✓ Loaded .env from default location');
+      envLoaded = true;
+    } else {
+      console.warn('[SERVER] ⚠ Could not find .env file (this is OK in Vercel where env vars are provided)');
+      console.warn('[SERVER] Tried paths:', envPaths);
+    }
   }
+} else {
+  console.log('[SERVER] Running in Vercel - using environment variables directly');
 }
 
 // Verify critical environment variables
@@ -71,9 +73,6 @@ const ratesRoutes = (await import('./src/routes/rates.js')).default;
 const bookRoutes = (await import('./src/routes/book.js')).default;
 const historyRoutes = (await import('./src/routes/history.js')).default;
 
-// #region agent log
-fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'server.ts:42',message:'Server initialization',data:{PORT,hasEnvVars:!!process.env.NEXT_PUBLIC_SUPABASE_URL},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
-// #endregion
 
 // CORS configuration
 const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',') || ['http://localhost:3000'];
@@ -140,10 +139,6 @@ app.get('/api/test/supabase', async (req, res) => {
       .select('*', { count: 'exact' })
       .limit(1);
     
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'server.ts:76',message:'Supabase query result',data:{hasData:!!data,hasError:!!error,errorMessage:error?.message,count},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
-    // #endregion
-    
     if (error) {
       console.error('[SUPABASE TEST] Error:', error);
       return res.status(500).json({
@@ -164,9 +159,6 @@ app.get('/api/test/supabase', async (req, res) => {
       timestamp: new Date().toISOString(),
     });
   } catch (error: any) {
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'server.ts:98',message:'Supabase test exception',data:{errorMessage:error?.message,errorStack:error?.stack},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
-    // #endregion
     console.error('[SUPABASE TEST] Exception:', error);
     res.status(500).json({
       success: false,

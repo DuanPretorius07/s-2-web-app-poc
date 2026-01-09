@@ -2,9 +2,9 @@ import { createClient } from '@supabase/supabase-js';
 import dotenv from 'dotenv';
 import path from 'path';
 
-// Load .env if not already loaded (defensive - should already be loaded by server.ts)
-// But this ensures it works even if imported directly
-if (!process.env.NEXT_PUBLIC_SUPABASE_URL && !process.env.SUPABASE_URL) {
+// Load .env if not already loaded and not in Vercel (Vercel provides env vars directly)
+// Skip .env loading in Vercel environment where env vars are provided directly
+if (process.env.VERCEL !== '1' && !process.env.NEXT_PUBLIC_SUPABASE_URL && !process.env.SUPABASE_URL) {
   const envPaths = [
     path.join(process.cwd(), '.env'),
     path.join(process.cwd(), '..', '.env'),
@@ -33,9 +33,12 @@ if (process.env.NODE_ENV !== 'production') {
 }
 
 if (!supabaseUrl) {
+  const errorMsg = process.env.VERCEL === '1'
+    ? 'Missing Supabase URL environment variable: NEXT_PUBLIC_SUPABASE_URL or SUPABASE_URL. Please set this in Vercel project settings.'
+    : 'Missing Supabase URL environment variable: NEXT_PUBLIC_SUPABASE_URL or SUPABASE_URL. Please set this in server/.env';
   console.error('[SUPABASE] ❌ Missing Supabase URL!');
-  console.error('[SUPABASE] Please set NEXT_PUBLIC_SUPABASE_URL or SUPABASE_URL in server/.env');
-  throw new Error('Missing Supabase URL environment variable: NEXT_PUBLIC_SUPABASE_URL or SUPABASE_URL');
+  console.error('[SUPABASE]', errorMsg);
+  throw new Error(errorMsg);
 }
 
 // Use service role key for server-side operations (bypasses RLS)
@@ -43,9 +46,12 @@ if (!supabaseUrl) {
 const supabaseKey = supabaseServiceRoleKey || supabaseAnonKey;
 
 if (!supabaseKey) {
+  const errorMsg = process.env.VERCEL === '1'
+    ? 'Missing Supabase API key: SUPABASE_SERVICE_ROLE_KEY or NEXT_PUBLIC_SUPABASE_ANON_KEY. Please set this in Vercel project settings.'
+    : 'Missing Supabase API key: SUPABASE_SERVICE_ROLE_KEY or NEXT_PUBLIC_SUPABASE_ANON_KEY. Please set this in server/.env';
   console.error('[SUPABASE] ❌ Missing Supabase API key!');
-  console.error('[SUPABASE] Please set SUPABASE_SERVICE_ROLE_KEY or NEXT_PUBLIC_SUPABASE_ANON_KEY in server/.env');
-  throw new Error('Missing Supabase key: SUPABASE_SERVICE_ROLE_KEY or NEXT_PUBLIC_SUPABASE_ANON_KEY');
+  console.error('[SUPABASE]', errorMsg);
+  throw new Error(errorMsg);
 }
 
 // Server-side client with service role key (bypasses Row Level Security)
