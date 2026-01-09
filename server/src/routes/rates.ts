@@ -202,8 +202,9 @@ async function callRatesAPI(requestBody: any): Promise<any> {
 
       const data = await response.json() as any;
       // Handle Lambda-style response format: data.results.rates
-      if (data?.data?.results?.rates) {
-        return { rates: data.data.results.rates };
+      const rates = data?.data?.results?.rates;
+      if (rates) {
+        return { rates };
       }
       return data;
     } else {
