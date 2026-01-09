@@ -21,7 +21,6 @@ export default function RatesForm() {
   const [loading, setLoading] = useState(false);
   const [rates, setRates] = useState<Rate[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [selectedRate, setSelectedRate] = useState<Rate | null>(null);
   const [bookingLoading, setBookingLoading] = useState(false);
 
   // Form state - matching exact field names from existing JS code
@@ -101,13 +100,11 @@ export default function RatesForm() {
     setLoading(true);
     setError(null);
     setRates([]);
-    setSelectedRate(null);
 
     try {
       // Determine stackable value
       const stackableYes = formData.stackable === 'Yes';
-      const stackableNo = formData.stackable === 'No';
-      const isStackable = stackableYes ? true : false;
+      const isStackable = stackableYes;
       const stackAmount = isStackable ? (parseInt(formData.stacks, 10) || 0) : 0;
 
       // Normalize freight type and determine rate types
@@ -225,7 +222,6 @@ export default function RatesForm() {
       }
 
       const bookingData = await response.json();
-      setSelectedRate(rate);
       
       // Update rate as booked in the UI
       setRates((prev) =>
