@@ -217,16 +217,6 @@ router.get('/quotes/:quoteId', authenticateToken, async (req: AuthRequest, res) 
 
     const payload = quote.request_payload_json;
     
-    // #region agent log
-    console.log('[QUOTE_DETAIL] Payload structure:', {
-      hasContact: !!payload?.contact,
-      hasOrigin: !!payload?.origin,
-      hasOriginCity: !!payload?.originCity,
-      hasFreightInfo: Array.isArray(payload?.freightInfo),
-      payloadKeys: payload ? Object.keys(payload) : [],
-    });
-    // #endregion
-    
     // Handle both old payload structure (contact, origin, destination, shipment) 
     // and new payload structure (originCity, originState, freightInfo)
     let contact, origin, destination, shipment, accessorials;

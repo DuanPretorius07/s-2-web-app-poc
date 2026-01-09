@@ -59,31 +59,19 @@ export default function BookingDetail() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'BookingDetail.tsx:61',message:'useEffect triggered',data:{bookingId},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-    // #endregion
     loadBooking();
   }, [bookingId]);
 
   const loadBooking = async () => {
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'BookingDetail.tsx:65',message:'loadBooking entry',data:{bookingId},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-    // #endregion
     try {
       const response = await fetch(`/api/history/bookings/${bookingId}`, {
         credentials: 'include',
       });
       if (response.ok) {
         const data = await response.json();
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'BookingDetail.tsx:72',message:'Booking data received',data:{hasBooking:!!data,hasQuoteRequest:!!data?.quoteRequest,quoteRequestId:data?.quoteRequest?.id},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
-        // #endregion
         setBooking(data);
       }
     } catch (error) {
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'BookingDetail.tsx:76',message:'loadBooking error',data:{error:String(error)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
-      // #endregion
       console.error('Failed to load booking:', error);
     } finally {
       setLoading(false);
@@ -378,11 +366,6 @@ export default function BookingDetail() {
                   <Link
                     to={`/history/quotes/${booking.quoteRequest.id}`}
                     className="text-indigo-600 hover:text-indigo-900 text-sm"
-                    onClick={() => {
-                      // #region agent log
-                      fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'BookingDetail.tsx:366',message:'Navigating to quote',data:{quoteRequestId:booking.quoteRequest?.id},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
-                      // #endregion
-                    }}
                   >
                     View original quote →
                   </Link>

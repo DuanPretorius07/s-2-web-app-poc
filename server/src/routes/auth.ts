@@ -244,27 +244,15 @@ router.post(
 
 // POST /api/auth/register (with invite token or create new client)
 router.post('/register', validateBody(registerSchema), async (req, res) => {
-  console.log('[REGISTER] Endpoint hit', { email: req.body?.email, hasClientName: !!req.body?.clientName });
-  // #region agent log
-  fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'auth.ts:234',message:'Register endpoint hit',data:{email:req.body?.email,hasClientName:!!req.body?.clientName},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-  // #endregion
   try {
     const { email, password, inviteToken, clientName } = req.body;
-    console.log('[REGISTER] Processing', { email });
 
     // Check if user already exists
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'auth.ts:239',message:'Checking existing user',data:{email},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-    // #endregion
     const { data: existing, error: existingError } = await supabaseAdmin
       .from('users')
       .select('id')
       .eq('email', email)
       .single();
-
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'auth.ts:245',message:'Existing user check result',data:{hasExisting:!!existing,existingError:existingError?.message},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-    // #endregion
 
     if (existing) {
       return res.status(400).json({
@@ -299,23 +287,13 @@ router.post('/register', validateBody(registerSchema), async (req, res) => {
       clientId = client.id;
     } else if (clientName) {
       // Create new client
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'auth.ts:277',message:'Creating client',data:{clientName},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-      // #endregion
       const { data: client, error: clientError } = await supabaseAdmin
         .from('clients')
         .insert({ name: clientName })
         .select('id')
         .single();
       
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'auth.ts:283',message:'Client creation result',data:{hasClient:!!client,clientError:clientError?.message,clientId:client?.id},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-      // #endregion
-      
       if (clientError || !client) {
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'auth.ts:286',message:'Client creation failed',data:{clientError:clientError?.message,details:clientError},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-        // #endregion
         throw new Error('Failed to create client');
       }
       clientId = client.id;
@@ -349,14 +327,7 @@ router.post('/register', validateBody(registerSchema), async (req, res) => {
       `)
       .single();
 
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'auth.ts:318',message:'User creation result',data:{hasUser:!!user,userError:userError?.message,userId:user?.id},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-    // #endregion
-
     if (userError || !user) {
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'auth.ts:321',message:'User creation failed',data:{userError:userError?.message,details:userError},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-      // #endregion
       throw new Error('Failed to create user');
     }
 
@@ -369,9 +340,6 @@ router.post('/register', validateBody(registerSchema), async (req, res) => {
     setTokenCookie(res, token);
 
     const client = Array.isArray(user.clients) ? user.clients[0] : user.clients;
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'auth.ts:335',message:'Sending success response',data:{userId:user.id},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-    // #endregion
     res.status(201).json({
       user: {
         id: user.id,
@@ -382,11 +350,7 @@ router.post('/register', validateBody(registerSchema), async (req, res) => {
       },
     });
   } catch (error: any) {
-    console.error('[REGISTER] Error caught:', error);
-    console.error('[REGISTER] Error stack:', error?.stack);
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'auth.ts:348',message:'Register error caught',data:{errorMessage:error?.message,errorStack:error?.stack},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-    // #endregion
+    console.error('[REGISTER] Error:', error);
     
     // Ensure response hasn't been sent
     if (!res.headersSent) {
