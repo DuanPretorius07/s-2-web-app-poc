@@ -214,8 +214,9 @@ async function callRatesAPI(requestBody: any): Promise<any> {
         body: JSON.stringify(enhancedBody),
       });
       // Handle Ship2Primus response format
-      if (data?.data?.results?.rates) {
-        return { rates: data.data.results.rates };
+      const rates = data?.data?.results?.rates;
+      if (rates) {
+        return { rates };
       }
       return data;
     }
