@@ -200,7 +200,7 @@ async function callRatesAPI(requestBody: any): Promise<any> {
         throw new Error(`API Gateway returned ${response.status}`);
       }
 
-      const data: any = await response.json();
+      const data = await response.json() as any;
       // Handle Lambda-style response format: data.results.rates
       if (data?.data?.results?.rates) {
         return { rates: data.data.results.rates };
