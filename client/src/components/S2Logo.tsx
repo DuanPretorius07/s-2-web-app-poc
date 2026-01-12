@@ -1,5 +1,3 @@
-import React from 'react';
-
 interface S2LogoProps {
   className?: string;
   size?: 'sm' | 'md' | 'lg';
