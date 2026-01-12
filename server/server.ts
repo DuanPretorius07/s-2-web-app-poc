@@ -71,17 +71,55 @@ import historyRoutes from './src/routes/history.js';
 const app = express();
 const PORT = process.env.PORT || 5000;
 
+// Trust proxy - required for Vercel and other reverse proxies
+// This allows Express to correctly identify client IPs and handle X-Forwarded-* headers
+if (process.env.VERCEL === '1' || process.env.NODE_ENV === 'production') {
+  app.set('trust proxy', true);
+}
 
 // CORS configuration
 const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',') || ['http://localhost:3000'];
 app.use(
   cors({
     origin: (origin, callback) => {
-      if (!origin || allowedOrigins.some(allowed => 
-        origin === allowed || origin.endsWith(allowed.replace('https://', ''))
-      )) {
+      // Allow requests with no origin (like mobile apps, Postman, or same-origin requests)
+      if (!origin) {
+        return callback(null, true);
+      }
+      
+      // Check if origin matches any allowed origin
+      const isAllowed = allowedOrigins.some(allowed => {
+        // Exact match
+        if (origin === allowed) {
+          return true;
+        }
+        
+        // Check if origin ends with the allowed domain (for subdomains)
+        const allowedDomain = allowed.replace(/^https?:\/\//, '');
+        const originDomain = origin.replace(/^https?:\/\//, '');
+        
+        // Exact domain match
+        if (originDomain === allowedDomain) {
+          return true;
+        }
+        
+        // Subdomain match (e.g., origin: https://app.vercel.app, allowed: vercel.app)
+        if (originDomain.endsWith('.' + allowedDomain)) {
+          return true;
+        }
+        
+        // Vercel preview deployments - allow any *.vercel.app origin if we're in Vercel
+        if (process.env.VERCEL === '1' && originDomain.endsWith('.vercel.app')) {
+          return true;
+        }
+        
+        return false;
+      });
+      
+      if (isAllowed) {
         callback(null, true);
       } else {
+        console.warn(`[CORS] Blocked origin: ${origin}. Allowed origins: ${allowedOrigins.join(', ')}`);
         callback(new Error('Not allowed by CORS'));
       }
     },
@@ -93,16 +131,21 @@ app.use(cookieParser());
 app.use(express.json());
 
 // Rate limiting
+// keyGenerator uses req.ip which respects trust proxy setting
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 10, // limit each IP to 10 requests per windowMs
   message: 'Too many authentication attempts, please try again later.',
+  standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
+  legacyHeaders: false, // Disable the `X-RateLimit-*` headers
 });
 
 const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 100,
   message: 'Too many requests, please try again later.',
+  standardHeaders: true,
+  legacyHeaders: false,
 });
 
 // Routes
