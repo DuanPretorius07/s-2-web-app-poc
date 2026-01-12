@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import AnimatedBackground from '../components/AnimatedBackground';
+import Navbar from '../components/Navbar';
 
 interface Quote {
   id: string;
@@ -45,6 +47,7 @@ interface Booking {
 
 export default function History() {
   const { user, logout } = useAuth();
+  const location = useLocation();
   const [activeTab, setActiveTab] = useState<'quotes' | 'bookings'>('quotes');
   const [quotes, setQuotes] = useState<Quote[]>([]);
   const [bookings, setBookings] = useState<Booking[]>([]);
@@ -111,43 +114,11 @@ export default function History() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <nav className="bg-white shadow">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between h-16">
-            <div className="flex">
-              <div className="flex-shrink-0 flex items-center">
-                <h1 className="text-xl font-bold text-gray-900">ShipPrimus Portal</h1>
-              </div>
-              <div className="hidden sm:ml-6 sm:flex sm:space-x-8">
-                <Link
-                  to="/"
-                  className="border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium"
-                >
-                  Get Rates
-                </Link>
-                <Link
-                  to="/history"
-                  className="border-indigo-500 text-gray-900 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium"
-                >
-                  History
-                </Link>
-              </div>
-            </div>
-            <div className="flex items-center">
-              <span className="text-sm text-gray-700 mr-4">{user?.email}</span>
-              <button
-                onClick={logout}
-                className="text-sm text-gray-500 hover:text-gray-700"
-              >
-                Logout
-              </button>
-            </div>
-          </div>
-        </div>
-      </nav>
+    <div className="min-h-screen relative" style={{ backgroundColor: 'transparent' }}>
+      <AnimatedBackground />
+      <Navbar currentPath={location.pathname} userEmail={user?.email} onLogout={logout} />
 
-      <div className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
+      <div className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8 relative z-10">
         <div className="px-4 py-6 sm:px-0">
           <div className="border-b border-gray-200 mb-6">
             <nav className="-mb-px flex space-x-8">
@@ -155,9 +126,9 @@ export default function History() {
                 onClick={() => setActiveTab('quotes')}
                 className={`${
                   activeTab === 'quotes'
-                    ? 'border-indigo-500 text-indigo-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                } whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm`}
+                    ? 'border-s2-red text-s2-red'
+                    : 'border-transparent text-gray-500 hover:text-s2-red hover:border-s2-red'
+                } whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm transition-colors`}
               >
                 Past Quotes
               </button>
@@ -165,9 +136,9 @@ export default function History() {
                 onClick={() => setActiveTab('bookings')}
                 className={`${
                   activeTab === 'bookings'
-                    ? 'border-indigo-500 text-indigo-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                } whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm`}
+                    ? 'border-s2-red text-s2-red'
+                    : 'border-transparent text-gray-500 hover:text-s2-red hover:border-s2-red'
+                } whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm transition-colors`}
               >
                 Past Bookings
               </button>
@@ -175,7 +146,7 @@ export default function History() {
           </div>
 
           {/* Filters */}
-          <div className="bg-white shadow rounded-lg p-4 mb-6">
+          <div className="bg-white shadow rounded-lg p-4 mb-6 bg-opacity-95">
             <h3 className="text-lg font-medium text-gray-900 mb-4">Filters</h3>
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-3 lg:grid-cols-6">
               <div>
@@ -184,7 +155,7 @@ export default function History() {
                   type="date"
                   value={filters.startDate}
                   onChange={(e) => setFilters({ ...filters, startDate: e.target.value })}
-                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-s2-red focus:ring-s2-red sm:text-sm"
                 />
               </div>
               <div>
@@ -193,7 +164,7 @@ export default function History() {
                   type="date"
                   value={filters.endDate}
                   onChange={(e) => setFilters({ ...filters, endDate: e.target.value })}
-                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-s2-red focus:ring-s2-red sm:text-sm"
                 />
               </div>
               <div>
@@ -202,7 +173,7 @@ export default function History() {
                   type="text"
                   value={filters.originPostal}
                   onChange={(e) => setFilters({ ...filters, originPostal: e.target.value })}
-                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-s2-red focus:ring-s2-red sm:text-sm"
                 />
               </div>
               <div>
@@ -211,7 +182,7 @@ export default function History() {
                   type="text"
                   value={filters.destinationPostal}
                   onChange={(e) => setFilters({ ...filters, destinationPostal: e.target.value })}
-                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-s2-red focus:ring-s2-red sm:text-sm"
                 />
               </div>
               <div>
@@ -220,7 +191,7 @@ export default function History() {
                   type="text"
                   value={filters.carrier}
                   onChange={(e) => setFilters({ ...filters, carrier: e.target.value })}
-                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-s2-red focus:ring-s2-red sm:text-sm"
                 />
               </div>
               {activeTab === 'bookings' && (
@@ -229,7 +200,7 @@ export default function History() {
                   <select
                     value={filters.status}
                     onChange={(e) => setFilters({ ...filters, status: e.target.value })}
-                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-s2-red focus:ring-s2-red sm:text-sm"
                   >
                     <option value="">All</option>
                     <option value="pending">Pending</option>
@@ -247,7 +218,7 @@ export default function History() {
               <div className="text-lg text-gray-500">Loading...</div>
             </div>
           ) : activeTab === 'quotes' ? (
-            <div className="bg-white shadow overflow-hidden sm:rounded-md">
+            <div className="bg-white shadow overflow-hidden sm:rounded-md bg-opacity-95">
               {quotes.length === 0 ? (
                 <div className="text-center py-12">
                   <p className="text-gray-500">No quotes found</p>
@@ -263,7 +234,7 @@ export default function History() {
                         <div className="flex items-center justify-between">
                           <div className="flex-1">
                             <div className="flex items-center">
-                              <p className="text-sm font-medium text-indigo-600">
+                              <p className="text-sm font-medium text-s2-red">
                                 {quote.contact.fullName}
                               </p>
                               <p className="ml-2 text-sm text-gray-500">{quote.contact.email}</p>
@@ -295,7 +266,7 @@ export default function History() {
               )}
             </div>
           ) : (
-            <div className="bg-white shadow overflow-hidden sm:rounded-md">
+            <div className="bg-white shadow overflow-hidden sm:rounded-md bg-opacity-95">
               {bookings.length === 0 ? (
                 <div className="text-center py-12">
                   <p className="text-gray-500">No bookings found</p>
@@ -311,7 +282,7 @@ export default function History() {
                         <div className="flex items-center justify-between">
                           <div className="flex-1">
                             <div className="flex items-center">
-                              <p className="text-sm font-medium text-indigo-600">
+                              <p className="text-sm font-medium text-s2-red">
                                 {booking.confirmationNumber || booking.bookingIdExternal || booking.id}
                               </p>
                               <span className={`ml-2 inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${

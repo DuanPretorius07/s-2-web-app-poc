@@ -1,11 +1,15 @@
-import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useState, useEffect } from 'react';
+import { useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import AnimatedBackground from '../components/AnimatedBackground';
+import Navbar from '../components/Navbar';
 
 interface Rate {
   id?: string;
   rateId?: string;
-  carrierName?: string;
+  dbId?: string; // Database ID for booking
+  name?: string; // Primary carrier name field
+  carrierName?: string; // Backward compatibility
   serviceName?: string;
   serviceLevel?: string;
   transitDays?: number;
@@ -18,10 +22,12 @@ interface Rate {
 
 export default function RatesForm() {
   const { user, logout } = useAuth();
+  const location = useLocation();
   const [loading, setLoading] = useState(false);
   const [rates, setRates] = useState<Rate[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [bookingLoading, setBookingLoading] = useState(false);
+  const [quoteId, setQuoteId] = useState<string | null>(null);
 
   // Form state - matching exact field names from existing JS code
   const [formData, setFormData] = useState({
@@ -169,9 +175,14 @@ export default function RatesForm() {
 
       const data = await response.json();
       
+      // Store quoteId for booking
+      if (data.quoteId) {
+        setQuoteId(data.quoteId);
+      }
+      
       // Handle response - match existing JS displayRates logic
       if (Array.isArray(data.rates) && data.rates.length > 0) {
-      setRates(data.rates);
+        setRates(data.rates);
       } else {
         const msg = data && data.userMessage ? data.userMessage : 'No rates found for your request.';
         setError(msg);
@@ -195,17 +206,35 @@ export default function RatesForm() {
     setError(null);
 
     try {
-      // Store the original request body (would need to be saved from form submission)
-      // For POC, send rate data directly for booking
-      const bookingPayload = {
-        rate: {
-          rateId: rate.rateId || rate.id,
-          carrierName: rate.carrierName,
-          serviceName: rate.serviceName || rate.serviceLevel,
-          totalCost: rate.total || rate.totalCost,
-          currency: rate.currency || 'USD',
-        },
-      };
+      const carrierName = rate.name || rate.carrierName || 'Unknown';
+      
+      // Use quoteId/selectedRateId flow if available, otherwise fall back to direct rate flow
+      let bookingPayload: any;
+      
+      if (quoteId && rate.dbId) {
+        // Use database flow - backend will fetch quote and rate from database
+        bookingPayload = {
+          quoteId: quoteId,
+          selectedRateId: rate.dbId, // Use database ID
+        };
+      } else if (quoteId && rate.rateId) {
+        // Fallback: try with external rateId
+        bookingPayload = {
+          quoteId: quoteId,
+          selectedRateId: rate.rateId || rate.id,
+        };
+      } else {
+        // Fallback to direct rate flow (POC)
+        bookingPayload = {
+          rate: {
+            rateId: rate.rateId || rate.id,
+            carrierName: carrierName,
+            serviceName: rate.serviceName || rate.serviceLevel,
+            totalCost: rate.total || rate.totalCost,
+            currency: rate.currency || 'USD',
+          },
+        };
+      }
 
       console.log('[UI] Booking rate:', bookingPayload);
 
@@ -226,13 +255,15 @@ export default function RatesForm() {
       // Update rate as booked in the UI
       setRates((prev) =>
         prev.map((r) => 
-          (r.rateId === rate.rateId || r.id === rate.id) 
+          (r.rateId === rate.rateId || r.id === rate.id || r.dbId === rate.dbId) 
             ? { ...r, booked: true } 
             : r
         )
       );
 
-      alert(`Booking confirmed! Confirmation: ${bookingData.confirmationNumber || bookingData.bookingId || 'N/A'}`);
+      // Show success message
+      const confirmationNumber = bookingData.confirmationNumber || bookingData.bookingId || 'N/A';
+      alert(`✅ Booking confirmed!\n\nConfirmation Number: ${confirmationNumber}\nCarrier: ${carrierName}\nService: ${rate.serviceName || rate.serviceLevel}\nTotal: $${(rate.total || rate.totalCost || 0).toFixed(2)}`);
     } catch (err: any) {
       console.error('Booking error:', err);
       setError(err.message || 'Failed to book shipment');
@@ -245,51 +276,37 @@ export default function RatesForm() {
     setFormData((prev) => ({ ...prev, [field]: value }));
   };
 
-  return (
-    <div className="min-h-screen bg-gray-50">
-      <nav className="bg-white shadow">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between h-16">
-            <div className="flex">
-              <div className="flex-shrink-0 flex items-center">
-                <h1 className="text-xl font-bold text-gray-900">ShipPrimus Portal</h1>
-              </div>
-              <div className="hidden sm:ml-6 sm:flex sm:space-x-8">
-                <Link
-                  to="/"
-                  className="border-indigo-500 text-gray-900 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium"
-                >
-                  Get Rates
-                </Link>
-                <Link
-                  to="/history"
-                  className="border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium"
-                >
-                  History
-                </Link>
-              </div>
-            </div>
-            <div className="flex items-center">
-              <span className="text-sm text-gray-700 mr-4">{user?.email}</span>
-              <button
-                onClick={logout}
-                className="text-sm text-gray-500 hover:text-gray-700"
-              >
-                Logout
-              </button>
-            </div>
-          </div>
-        </div>
-      </nav>
+  // #region agent log
+  useEffect(() => {
+    fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'RatesForm.tsx:return',message:'RatesForm rendering with components',data:{hasAnimatedBg:true,hasNavbar:true,pathname:location.pathname},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+  }, [location.pathname]);
+  // #endregion
 
-      <div className="py-8 px-4 sm:px-6 lg:px-8">
-        <div className="max-w-4xl mx-auto">
-        <div className="bg-white shadow rounded-lg p-6">
-            <h1 className="text-2xl font-bold text-gray-900 mb-6">Get Shipping Rates</h1>
+  return (
+    <div className="min-h-screen relative" style={{ backgroundColor: 'transparent' }}>
+      <AnimatedBackground />
+      <Navbar currentPath={location.pathname} userEmail={user?.email} onLogout={logout} />
+
+      <div className="py-8 px-4 sm:px-6 lg:px-8 relative z-10">
+        <div className="max-w-6xl mx-auto">
+        <div className="bg-white shadow-lg rounded-lg p-6 border border-gray-200 bg-opacity-95">
+            <h1 className="text-2xl font-bold text-s2-red mb-6">Get Shipping Rates</h1>
 
             {error && (
-            <div className="mb-4 rounded-md bg-red-50 p-4">
-                <div className="text-sm text-red-800">{error}</div>
+            <div className="mb-4 rounded-md bg-red-50 border border-red-200 p-4">
+                <div className="text-sm font-medium text-red-800">{error}</div>
+            </div>
+          )}
+          
+          {loading && (
+            <div className="mb-4 rounded-md bg-s2-red-lighter border border-s2-red-light p-4">
+                <div className="text-sm font-medium text-s2-red flex items-center">
+                  <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-s2-red" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  Fetching rates...
+                </div>
             </div>
           )}
 
@@ -307,7 +324,7 @@ export default function RatesForm() {
                       name="origin_country"
                       value={formData.origin_country}
                       onChange={(e) => updateField('origin_country', e.target.value)}
-                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-s2-red focus:ring-s2-red sm:text-sm"
                   >
                       <option value="">Please Select</option>
                     <option value="US">United States</option>
@@ -325,7 +342,7 @@ export default function RatesForm() {
                       name="origin_zipcode"
                       value={formData.origin_zipcode}
                       onChange={(e) => updateField('origin_zipcode', e.target.value)}
-                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-s2-red focus:ring-s2-red sm:text-sm"
                     />
                 </div>
                 <div>
@@ -338,7 +355,7 @@ export default function RatesForm() {
                       name="origin_city"
                       value={formData.origin_city}
                       onChange={(e) => updateField('origin_city', e.target.value)}
-                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-s2-red focus:ring-s2-red sm:text-sm"
                   />
                 </div>
                 <div>
@@ -351,7 +368,7 @@ export default function RatesForm() {
                       name="origin_state"
                       value={formData.origin_state}
                       onChange={(e) => updateField('origin_state', e.target.value)}
-                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-s2-red focus:ring-s2-red sm:text-sm"
                   />
                 </div>
               </div>
@@ -370,7 +387,7 @@ export default function RatesForm() {
                       name="destination_country"
                       value={formData.destination_country}
                       onChange={(e) => updateField('destination_country', e.target.value)}
-                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-s2-red focus:ring-s2-red sm:text-sm"
                   >
                       <option value="">Please Select</option>
                     <option value="US">United States</option>
@@ -388,7 +405,7 @@ export default function RatesForm() {
                       name="destination_zipcode"
                       value={formData.destination_zipcode}
                       onChange={(e) => updateField('destination_zipcode', e.target.value)}
-                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-s2-red focus:ring-s2-red sm:text-sm"
                     />
                 </div>
                 <div>
@@ -401,7 +418,7 @@ export default function RatesForm() {
                       name="destination_city"
                       value={formData.destination_city}
                       onChange={(e) => updateField('destination_city', e.target.value)}
-                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-s2-red focus:ring-s2-red sm:text-sm"
                   />
                 </div>
                 <div>
@@ -414,7 +431,7 @@ export default function RatesForm() {
                       name="destination_state"
                       value={formData.destination_state}
                       onChange={(e) => updateField('destination_state', e.target.value)}
-                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-s2-red focus:ring-s2-red sm:text-sm"
                   />
                 </div>
               </div>
@@ -433,7 +450,7 @@ export default function RatesForm() {
                     name="pick_up_date2"
                     value={formData.pick_up_date2}
                     onChange={(e) => updateField('pick_up_date2', e.target.value)}
-                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-s2-red focus:ring-s2-red sm:text-sm"
                   />
                 </div>
               </div>
@@ -448,7 +465,7 @@ export default function RatesForm() {
                   name="freight_type"
                   value={formData.freight_type}
                   onChange={(e) => updateField('freight_type', e.target.value)}
-                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-s2-red focus:ring-s2-red sm:text-sm"
                 >
                   <option value="">Please Select</option>
                   <option value="LTL">LTL</option>
@@ -469,7 +486,7 @@ export default function RatesForm() {
                   name="packaging_type"
                   value={formData.packaging_type}
                   onChange={(e) => updateField('packaging_type', e.target.value)}
-                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-s2-red focus:ring-s2-red sm:text-sm"
                 >
                   <option value="PLT">Pallet</option>
                   <option value="CTN">Carton</option>
@@ -489,7 +506,7 @@ export default function RatesForm() {
                     min="1"
                   value={formData.quantity}
                   onChange={(e) => updateField('quantity', e.target.value)}
-                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-s2-red focus:ring-s2-red sm:text-sm"
                   />
               </div>
 
@@ -509,7 +526,7 @@ export default function RatesForm() {
                         step="0.1"
                       value={formData.length}
                       onChange={(e) => updateField('length', e.target.value)}
-                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-s2-red focus:ring-s2-red sm:text-sm"
                     />
                     </div>
                     <div>
@@ -524,7 +541,7 @@ export default function RatesForm() {
                         step="0.1"
                       value={formData.width}
                       onChange={(e) => updateField('width', e.target.value)}
-                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-s2-red focus:ring-s2-red sm:text-sm"
                     />
                     </div>
                     <div>
@@ -539,7 +556,7 @@ export default function RatesForm() {
                         step="0.1"
                       value={formData.height}
                       onChange={(e) => updateField('height', e.target.value)}
-                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-s2-red focus:ring-s2-red sm:text-sm"
                     />
                   </div>
                 </div>
@@ -558,7 +575,7 @@ export default function RatesForm() {
                   step="0.1"
                   value={formData.weight}
                   onChange={(e) => updateField('weight', e.target.value)}
-                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-s2-red focus:ring-s2-red sm:text-sm"
                 />
                     </div>
 
@@ -572,7 +589,7 @@ export default function RatesForm() {
                   name="hazmat"
                   value={formData.hazmat}
                   onChange={(e) => updateField('hazmat', e.target.value)}
-                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-s2-red focus:ring-s2-red sm:text-sm"
                       >
                   <option value="">Please Select</option>
                   <option value="Yes">Yes</option>
@@ -619,7 +636,7 @@ export default function RatesForm() {
                       min="1"
                       value={formData.stacks}
                       onChange={(e) => updateField('stacks', e.target.value)}
-                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-s2-red focus:ring-s2-red sm:text-sm"
                     />
                   </div>
                 )}
@@ -639,7 +656,7 @@ export default function RatesForm() {
                       name="firstname"
                       value={formData.firstname}
                       onChange={(e) => updateField('firstname', e.target.value)}
-                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-s2-red focus:ring-s2-red sm:text-sm"
                 />
               </div>
                   <div>
@@ -652,7 +669,7 @@ export default function RatesForm() {
                       name="lastname"
                       value={formData.lastname}
                       onChange={(e) => updateField('lastname', e.target.value)}
-                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-s2-red focus:ring-s2-red sm:text-sm"
                     />
             </div>
                   <div>
@@ -666,7 +683,7 @@ export default function RatesForm() {
                       required
                       value={formData.email}
                       onChange={(e) => updateField('email', e.target.value)}
-                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-s2-red focus:ring-s2-red sm:text-sm"
                     />
                   </div>
                   <div>
@@ -679,7 +696,7 @@ export default function RatesForm() {
                       name="company_name"
                       value={formData.company_name}
                       onChange={(e) => updateField('company_name', e.target.value)}
-                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-s2-red focus:ring-s2-red sm:text-sm"
                     />
                   </div>
               </div>
@@ -689,9 +706,17 @@ export default function RatesForm() {
               <button
                 type="submit"
                 disabled={loading}
-                className="px-6 py-2 border border-transparent text-base font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="px-6 py-3 border border-transparent text-base font-semibold rounded-md text-white bg-s2-red hover:bg-s2-red-dark focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-s2-red disabled:opacity-50 disabled:cursor-not-allowed transition-colors shadow-md hover:shadow-lg"
               >
-                  {loading ? 'Getting Rates...' : 'Submit'}
+                  {loading ? (
+                    <span className="flex items-center">
+                      <svg className="animate-spin -ml-1 mr-2 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                      </svg>
+                      Getting Rates...
+                    </span>
+                  ) : 'Get Rates'}
               </button>
             </div>
           </form>
@@ -699,54 +724,66 @@ export default function RatesForm() {
             {/* Rates Display Table */}
           {rates.length > 0 && (
             <div className="mt-8">
-                <h2 className="text-xl font-semibold text-gray-900 mb-4">Available Rates</h2>
-                <div className="overflow-x-auto">
-                  <table className="min-w-full divide-y divide-gray-200" id="ratesTable">
-                    <thead className="bg-gray-50">
+                <h2 className="text-xl font-semibold text-s2-red mb-4">Available Rates</h2>
+                <div className="overflow-x-auto shadow-md rounded-lg border border-gray-200 -mx-6 sm:mx-0">
+                  <table className="w-full divide-y divide-gray-200" id="ratesTable">
+                    <thead className="bg-s2-red">
                       <tr>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        <th className="px-3 py-3 text-left text-xs font-semibold text-white uppercase tracking-wider w-auto">
                           Carrier
                         </th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        <th className="px-3 py-3 text-left text-xs font-semibold text-white uppercase tracking-wider w-24">
                           Transit Days
                         </th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        <th className="px-3 py-3 text-left text-xs font-semibold text-white uppercase tracking-wider w-24">
                           Total
                         </th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        <th className="px-3 py-3 text-left text-xs font-semibold text-white uppercase tracking-wider w-auto min-w-[120px]">
                           Service
                         </th>
-                        <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        <th className="px-3 py-3 text-right text-xs font-semibold text-white uppercase tracking-wider w-24">
                           Action
                         </th>
                       </tr>
                     </thead>
                     <tbody id="ratesTableBody" className="bg-white divide-y divide-gray-200">
                       {rates.map((rate, idx) => (
-                        <tr key={rate.rateId || rate.id || idx} className={rate.booked ? 'bg-green-50' : ''}>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                            {rate.iconUrl && <img src={rate.iconUrl} alt="Carrier Logo" width="100" className="mb-2" />}
-                            {rate.carrierName || 'Unknown'}
+                        <tr key={rate.rateId || rate.id || idx} className={rate.booked ? 'bg-green-50 hover:bg-green-100' : 'hover:bg-s2-red-lighter'} transition-colors>
+                          <td className="px-3 py-4 text-sm font-semibold text-gray-900">
+                            <div className="flex flex-col">
+                              {rate.iconUrl && <img src={rate.iconUrl} alt="Carrier Logo" className="h-8 w-auto mb-1 object-contain" />}
+                              <span className="text-s2-red">{rate.name || rate.carrierName || 'Unknown'}</span>
+                            </div>
                           </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                            {rate.transitDays != null ? rate.transitDays : '—'}
+                          <td className="px-3 py-4 text-sm text-gray-700 whitespace-nowrap">
+                            {rate.transitDays != null ? `${rate.transitDays} days` : '—'}
                           </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                          <td className="px-3 py-4 text-sm font-bold text-s2-red whitespace-nowrap">
                             ${((rate.total || rate.totalCost || 0).toFixed(2))}
                           </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                            {rate.serviceLevel || rate.serviceName || '—'}
+                          <td className="px-3 py-4 text-sm text-gray-700">
+                            <span className="truncate block max-w-[200px]">{rate.serviceLevel || rate.serviceName || '—'}</span>
                           </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                          <td className="px-3 py-4 text-right text-sm font-medium whitespace-nowrap">
                             {rate.booked ? (
-                              <span className="text-green-600">Booked</span>
+                              <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-semibold text-green-800 bg-green-100">
+                                ✓ Booked
+                              </span>
                             ) : (
                               <button
                                 onClick={() => handleBook(rate)}
                                 disabled={bookingLoading}
-                                className="text-indigo-600 hover:text-indigo-900 disabled:opacity-50 disabled:cursor-not-allowed"
+                                className="px-3 py-1.5 text-xs font-semibold text-white bg-s2-red hover:bg-s2-red-dark rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-s2-red disabled:opacity-50 disabled:cursor-not-allowed transition-colors shadow-sm hover:shadow-md whitespace-nowrap"
                               >
-                                {bookingLoading ? 'Booking...' : 'Book'}
+                                {bookingLoading ? (
+                                  <span className="flex items-center">
+                                    <svg className="animate-spin -ml-1 mr-1 h-3 w-3 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                    </svg>
+                                    Booking...
+                                  </span>
+                                ) : 'Book'}
                               </button>
                             )}
                           </td>

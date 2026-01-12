@@ -3,7 +3,8 @@ import { useState } from 'react';
 interface Rate {
   id: string;
   rateId?: string;
-  carrierName: string;
+  name?: string; // Primary carrier name field
+  carrierName: string; // Backward compatibility
   serviceName: string;
   transitDays?: number;
   totalCost: number;
@@ -130,7 +131,7 @@ export default function RatesTable({ rates, onBook, loading }: RatesTableProps) 
             {sortedRates.map((rate) => (
               <tr key={rate.id} className={rate.booked ? 'bg-green-50' : ''}>
                 <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                  {rate.carrierName}
+                  {rate.name || rate.carrierName}
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                   {rate.serviceName}

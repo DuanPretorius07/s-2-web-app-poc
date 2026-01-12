@@ -45,18 +45,25 @@ async function callShip2PrimusBook(quoteRequest: any, rate: any): Promise<{
   }
 
   try {
+    // Construct booking payload according to ShipPrimus API schema
+    // Include original quote request and selected rate information
+    const bookingPayload: any = {
+      quoteRequest: quoteRequest.requestPayloadJson || {},
+      rate: {
+        rateId: rate.rateId,
+        carrierName: rate.carrierName,
+        serviceName: rate.serviceName,
+        totalCost: rate.totalCost,
+        currency: rate.currency || 'USD',
+      },
+    };
+
+    // Log the outgoing payload for debugging (server-side only)
+    console.log('[BOOK] Booking payload:', JSON.stringify(bookingPayload, null, 2));
+
     const data = await ship2PrimusRequest<any>(apiUrl, {
       method: 'POST',
-      body: JSON.stringify({
-        quoteRequest: quoteRequest.requestPayloadJson,
-        rate: {
-          rateId: rate.rateId,
-          carrierName: rate.carrierName,
-          serviceName: rate.serviceName,
-          totalCost: rate.totalCost,
-          currency: rate.currency,
-        },
-      }),
+      body: JSON.stringify(bookingPayload),
     });
 
     return {

@@ -370,6 +370,9 @@ router.post('/rates', authenticateToken, validateBody(rateRequestSchema), async 
     rates.sort((a, b) => (a.total ?? a.totalCost ?? Infinity) - (b.total ?? b.totalCost ?? Infinity));
 
     // Save quote request and rates to database (optional - for tracking)
+    let quoteId: string | null = null;
+    const rateIdMap = new Map<string, string>(); // Map external rate_id to database id
+    
     try {
       const { data: quoteRequest, error: quoteError } = await supabaseAdmin
         .from('quote_requests')
@@ -382,19 +385,56 @@ router.post('/rates', authenticateToken, validateBody(rateRequestSchema), async 
         .single();
 
       if (!quoteError && quoteRequest) {
-        // Save rates to database
-        const ratesToInsert = rates.map((rate: any) => ({
-          quote_request_id: quoteRequest.id,
-          rate_id: rate.id || rate.rateId || rate.rate_id || crypto.randomUUID(),
-          carrier_name: rate.carrier || rate.carrierName || rate.carrier_name || 'Unknown',
-          service_name: rate.service || rate.serviceName || rate.service_name || rate.serviceLevel || 'Standard',
-          transit_days: rate.transitDays || rate.transit_days || null,
-          total_cost: rate.total || rate.totalCost || rate.total_cost || rate.cost || 0,
-          currency: rate.currency || 'USD',
-          raw_json: rate as any,
-        }));
+        quoteId = quoteRequest.id;
+        
+        // Save rates to database - use same normalization logic
+        const ratesToInsert = rates.map((rate: any) => {
+          const carrierName = rate.name || 
+                             rate.carrierName || 
+                             rate.carrier_name || 
+                             rate.carrier || 
+                             rate.companyName || 
+                             rate.company_name ||
+                             rate.company ||
+                             rate.provider ||
+                             rate.providerName ||
+                             'Unknown';
 
-        await supabaseAdmin.from('rates').insert(ratesToInsert);
+          const serviceName = rate.serviceName || 
+                             rate.service_name || 
+                             rate.service || 
+                             rate.serviceLevel || 
+                             rate.service_level ||
+                             rate.serviceType ||
+                             'Standard';
+
+          const externalRateId = rate.id || rate.rateId || rate.rate_id || crypto.randomUUID();
+
+          return {
+            quote_request_id: quoteRequest.id,
+            rate_id: externalRateId,
+            carrier_name: carrierName,
+            service_name: serviceName,
+            transit_days: rate.transitDays || rate.transit_days || rate.transitTime || rate.transit_time || null,
+            total_cost: rate.total || rate.totalCost || rate.total_cost || rate.cost || rate.price || rate.amount || 0,
+            currency: rate.currency || rate.currencyCode || 'USD',
+            raw_json: rate as any,
+          };
+        });
+
+        const { data: insertedRates, error: insertError } = await supabaseAdmin
+          .from('rates')
+          .insert(ratesToInsert)
+          .select('id, rate_id');
+
+        if (!insertError && insertedRates) {
+          // Create a map of external rate_id to database id for frontend
+          insertedRates.forEach((dbRate: any) => {
+            if (dbRate.rate_id) {
+              rateIdMap.set(dbRate.rate_id, dbRate.id);
+            }
+          });
+        }
 
         // Audit log
         await supabaseAdmin.from('audit_logs').insert({
@@ -412,21 +452,77 @@ router.post('/rates', authenticateToken, validateBody(rateRequestSchema), async 
       console.warn('[RATES] Database save failed (non-critical):', dbError);
     }
 
+    // Normalize rates - extract carrier name from various possible fields
+    // Log first rate structure for debugging (only in development)
+    if (process.env.NODE_ENV === 'development' && rates.length > 0) {
+      console.log('[RATES] Sample rate structure:', JSON.stringify(rates[0], null, 2));
+    }
+
     // Return response matching existing JS expected format
     res.json({
       requestId,
-      rates: rates.map((rate: any) => ({
-        id: rate.id || rate.rateId || rate.rate_id,
-        rateId: rate.id || rate.rateId || rate.rate_id,
-        carrierName: rate.carrier || rate.carrierName || rate.carrier_name,
-        serviceName: rate.service || rate.serviceName || rate.service_name || rate.serviceLevel,
-        serviceLevel: rate.serviceLevel || rate.service || rate.serviceName || rate.service_name,
-        transitDays: rate.transitDays || rate.transit_days,
-        total: rate.total || rate.totalCost || rate.total_cost || rate.cost,
-        totalCost: rate.total || rate.totalCost || rate.total_cost || rate.cost,
-        currency: rate.currency || 'USD',
-        iconUrl: rate.iconUrl || rate.icon_url,
-      })),
+      quoteId: quoteId || undefined, // Include quoteId if available for booking
+      rates: rates.map((rate: any) => {
+        // Extract carrier name - check multiple possible field names
+        // Priority: name > carrierName > carrier_name > carrier > companyName > company
+        const carrierName = rate.name || 
+                            rate.carrierName || 
+                            rate.carrier_name || 
+                            rate.carrier || 
+                            rate.companyName || 
+                            rate.company_name ||
+                            rate.company ||
+                            rate.provider ||
+                            rate.providerName ||
+                            null;
+
+        // Extract service name
+        const serviceName = rate.serviceName || 
+                           rate.service_name || 
+                           rate.service || 
+                           rate.serviceLevel || 
+                           rate.service_level ||
+                           rate.serviceType ||
+                           null;
+
+        // Extract cost
+        const totalCost = rate.total || 
+                         rate.totalCost || 
+                         rate.total_cost || 
+                         rate.cost || 
+                         rate.price ||
+                         rate.amount ||
+                         0;
+
+        // Extract transit days
+        const transitDays = rate.transitDays || 
+                           rate.transit_days || 
+                           rate.transitTime || 
+                           rate.transit_time ||
+                           rate.deliveryDays ||
+                           rate.delivery_days ||
+                           null;
+
+        const externalRateId = rate.id || rate.rateId || rate.rate_id || crypto.randomUUID();
+        const dbRateId = rateIdMap.get(externalRateId) || null; // Database ID for booking
+        
+        return {
+          id: externalRateId, // External rate ID
+          rateId: externalRateId, // External rate ID (backward compatibility)
+          dbId: dbRateId, // Database ID for booking (use this as selectedRateId)
+          name: carrierName || 'Unknown', // Internal variable should be 'name' per requirements
+          carrierName: carrierName || 'Unknown', // Keep for backward compatibility
+          serviceName: serviceName || 'Standard',
+          serviceLevel: rate.serviceLevel || rate.service_level || serviceName || 'Standard',
+          transitDays: transitDays,
+          total: totalCost,
+          totalCost: totalCost,
+          cost: totalCost,
+          currency: rate.currency || rate.currencyCode || 'USD',
+          iconUrl: rate.iconUrl || rate.icon_url || rate.logoUrl || rate.logo_url,
+          rawJson: rate, // Include raw data for debugging
+        };
+      }),
     });
   } catch (error: any) {
     console.error('[RATES] Endpoint error:', error);
