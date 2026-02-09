@@ -9,7 +9,10 @@ A full-stack shipping quote and booking portal web application designed for HubS
 - **Shipping Flow**: Get rates → View results → Book shipment → View history
 - **HubSpot Integration**: Embeddable via iframe or script loader with context prefill
 - **History Management**: View past quotes and bookings with filtering
-- **HubSpot CRM Writeback**: Optional server-side notes creation (when configured)
+- **HubSpot CRM Writeback**: Automatic contact sync and rate request notes (when configured)
+- **Rate Limiting**: 3 quote requests per email (lifetime) with clear user messaging
+- **Hazmat Blocking**: Automatic blocking of hazardous materials with contact S2 guidance
+- **Simplified Quote Form**: ZIP code-only address input for streamlined user experience
 
 ## Tech Stack
 
@@ -77,13 +80,33 @@ A full-stack shipping quote and booking portal web application designed for HubS
    
    Create `server/.env`:
    ```env
-   DATABASE_URL="postgresql://user:password@localhost:5432/shipprimus?schema=public"
+   # Supabase Configuration (required)
+   NEXT_PUBLIC_SUPABASE_URL="https://your-project.supabase.co"
+   SUPABASE_SERVICE_ROLE_KEY="your-service-role-key"
+   NEXT_PUBLIC_SUPABASE_ANON_KEY="your-anon-key"
+   
+   # JWT Secret (required)
    JWT_SECRET="your-super-secret-jwt-key-change-in-production"
+   
+   # Ship2Primus API Configuration (required for production)
+   SHIP2PRIMUS_RATES_URL="https://s-2international-api.shipprimus.com/applet/v1/rate/multiple"
+   SHIP2PRIMUS_BOOK_URL="https://s-2international-api.shipprimus.com/api/v1/book"
+   SHIP2PRIMUS_LOGIN_URL="https://s-2international-api.shipprimus.com/api/v1/login"
+   SHIP2PRIMUS_USERNAME="your-ship2primus-username"
+   SHIP2PRIMUS_PASSWORD="your-ship2primus-password"
+   
+   # Legacy API Gateway (optional - for backward compatibility)
    API_GATEWAY_RATES_URL="https://api-gateway.example.com/rates"
-   API_GATEWAY_BOOK_URL="https://api-gateway.example.com/book"
    PROXY_API_KEY="your-api-gateway-proxy-key"
-   HUBSPOT_ACCESS_TOKEN=""  # Optional
+   
+   # HubSpot Integration (optional - for automatic contact sync and notes)
+   HUBSPOT_PRIVATE_APP_TOKEN="your-hubspot-private-app-token"
+   HUBSPOT_ACCESS_TOKEN=""  # Legacy - use HUBSPOT_PRIVATE_APP_TOKEN instead
+   
+   # CORS Configuration
    ALLOWED_ORIGINS="http://localhost:3000,https://app.hubspot.com,https://*.hubspot.com"
+   
+   # Server Configuration
    PORT=5000
    NODE_ENV=development
    ```
@@ -128,6 +151,11 @@ npm run test:client
 
 ### Rates & Booking
 - `POST /api/rates` - Get shipping rates
+  - Requires authentication
+  - Enforces 3 quote requests per email (lifetime)
+  - Blocks hazmat shipments with contact S2 message
+  - Automatically creates HubSpot notes (when configured)
+  - Returns rates sorted by price (cheapest first)
 - `POST /api/book` - Book a shipment
 
 ### History
@@ -262,14 +290,25 @@ npm test
 
 ### Environment Variables
 
-Ensure all required environment variables are set in production:
-- `DATABASE_URL`
-- `JWT_SECRET` (use a strong random secret)
-- `API_GATEWAY_RATES_URL`
-- `API_GATEWAY_BOOK_URL`
-- `PROXY_API_KEY`
-- `ALLOWED_ORIGINS` (include your HubSpot domains)
-- `NODE_ENV=production`
+Ensure all required environment variables are set in production (see `server/env.example` for full list):
+- **Supabase** (required): `NEXT_PUBLIC_SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+- **JWT** (required): `JWT_SECRET` (use a strong random secret)
+- **Ship2Primus** (required for production): `SHIP2PRIMUS_RATES_URL`, `SHIP2PRIMUS_BOOK_URL`, `SHIP2PRIMUS_LOGIN_URL`, `SHIP2PRIMUS_USERNAME`, `SHIP2PRIMUS_PASSWORD`
+- **HubSpot** (optional): `HUBSPOT_PRIVATE_APP_TOKEN` for automatic contact sync and notes
+- **CORS**: `ALLOWED_ORIGINS` (include your HubSpot domains)
+- **Server**: `PORT`, `NODE_ENV=production`
+
+### Database Setup
+
+The application uses Supabase (PostgreSQL). Ensure the following tables exist:
+- `users` (with columns: `id`, `email`, `firstname`, `lastname`, `password_hash`, `client_id`, `role`, `hubspot_opt_in`)
+- `clients` (with columns: `id`, `name`, `rate_tokens_remaining`, `rate_tokens_used`)
+- `quote_requests` (for tracking rate requests)
+- `rates` (for storing rate results)
+- `bookings` (for booking records)
+- `audit_logs` (for activity logging)
+
+**Note**: The database uses `firstname` and `lastname` (camelCase), not `first_name` and `last_name` (snake_case).
 
 ### Build for Production
 
@@ -279,6 +318,16 @@ npm start
 ```
 
 The server will serve the built frontend from `client/dist`.
+
+### Vercel Deployment
+
+1. Connect your GitHub repository to Vercel
+2. Set all environment variables in Vercel project settings
+3. Configure build command: `npm run vercel-build`
+4. Set output directory: `client/dist` (if needed)
+5. Deploy
+
+The application will automatically build and deploy on push to the main branch.
 
 ## License
 

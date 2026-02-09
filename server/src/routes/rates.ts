@@ -173,16 +173,22 @@ async function callRatesAPI(requestBody: any): Promise<any> {
 
   try {
     // Enhance request body with Lambda-style logic:
-    // - Use defaultCity/defaultState if city/state missing (matching Lambda)
+    // - Use defaultCity/defaultState if city/state missing (API REQUIRES these parameters)
     // - Build freight info with auto-calculated freight class
+    // Note: API requires city/state parameters, but using placeholders may result in 0 rates
+    // TODO: Consider adding ZIP code lookup to get real city/state values
     const enhancedBody = {
       ...requestBody,
-      originCity: requestBody.originCity || 'defaultCity',
-      originState: requestBody.originState || 'defaultState',
-      destinationCity: requestBody.destinationCity || 'defaultCity',
-      destinationState: requestBody.destinationState || 'defaultState',
+      originCity: requestBody.originCity && requestBody.originCity.trim() !== '' ? requestBody.originCity.trim() : 'defaultCity',
+      originState: requestBody.originState && requestBody.originState.trim() !== '' ? requestBody.originState.trim() : 'defaultState',
+      destinationCity: requestBody.destinationCity && requestBody.destinationCity.trim() !== '' ? requestBody.destinationCity.trim() : 'defaultCity',
+      destinationState: requestBody.destinationState && requestBody.destinationState.trim() !== '' ? requestBody.destinationState.trim() : 'defaultState',
       freightInfo: buildFreightInfo(requestBody.freightInfo || []),
     };
+
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'rates.ts:callRatesAPI:enhancedBody',message:'Enhanced body created',data:{originCity:enhancedBody.originCity,originState:enhancedBody.originState,destinationCity:enhancedBody.destinationCity,destinationState:enhancedBody.destinationState,originZipcode:enhancedBody.originZipcode,destinationZipcode:enhancedBody.destinationZipcode,hasFreightInfo:Array.isArray(enhancedBody.freightInfo),freightInfoLength:Array.isArray(enhancedBody.freightInfo)?enhancedBody.freightInfo.length:0},timestamp:Date.now(),runId:'debug-ship2primus',hypothesisId:'H2,H4'})}).catch(()=>{});
+    // #endregion
 
     // #region agent log
     fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{
@@ -217,7 +223,7 @@ async function callRatesAPI(requestBody: any): Promise<any> {
       const { freightInfo, rateTypesList, ...rest } = enhancedBody as any;
 
       const qs = new URLSearchParams();
-      // Basic scalar fields
+      // Basic scalar fields - include all values (API requires city/state even if placeholders)
       Object.entries(rest).forEach(([key, value]) => {
         if (value === undefined || value === null) return;
         qs.set(key, String(value));
@@ -239,29 +245,49 @@ async function callRatesAPI(requestBody: any): Promise<any> {
           : `${ship2PrimusUrl}?${qs.toString()}`;
 
       // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({
-          sessionId:'debug-session',
-          runId:'pre-fix',
-          hypothesisId:'H-VENDOR-QUERYSTRING',
-          location:'rates.ts:callRatesAPI:Ship2PrimusURL',
-          message:'Ship2Primus GET URL + query characteristics',
-          data:{
-            urlLength:urlWithQuery.length,
-            hasVendorIdListParam:qs.has('vendorIdList[]'),
-            rateTypesListParamCount:qs.getAll('rateTypesList[]').length,
-            hasFreightInfoParam:qs.has('freightInfo')
-          },
-          timestamp:Date.now()
-        })
-      }).catch(()=>{});
+      fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'rates.ts:callRatesAPI:urlBuilt',message:'URL with query params built',data:{urlLength:urlWithQuery.length,urlPreview:urlWithQuery.substring(0,300),hasOriginCity:qs.has('originCity'),originCityValue:qs.get('originCity'),hasOriginState:qs.has('originState'),originStateValue:qs.get('originState'),hasOriginZipcode:qs.has('originZipcode'),hasDestinationZipcode:qs.has('destinationZipcode'),hasFreightInfo:qs.has('freightInfo'),rateTypesListCount:qs.getAll('rateTypesList[]').length},timestamp:Date.now(),runId:'debug-ship2primus',hypothesisId:'H2,H3,H4'})}).catch(()=>{});
       // #endregion
 
-      const data = await ship2PrimusRequest<any>(urlWithQuery, {
-        method: 'GET',
+      console.log('[RATES] Ship2Primus API call - URL:', urlWithQuery.substring(0, 200) + (urlWithQuery.length > 200 ? '...' : ''));
+      console.log('[RATES] Ship2Primus API call - Request payload summary:', {
+        originZipcode: enhancedBody.originZipcode,
+        destinationZipcode: enhancedBody.destinationZipcode,
+        pickupDate: enhancedBody.pickupDate,
+        rateTypesList: enhancedBody.rateTypesList,
+        freightInfoCount: Array.isArray(enhancedBody.freightInfo) ? enhancedBody.freightInfo.length : 0,
       });
+
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'rates.ts:callRatesAPI:beforeShip2PrimusRequest',message:'About to call ship2PrimusRequest',data:{method:'GET',urlLength:urlWithQuery.length},timestamp:Date.now(),runId:'debug-ship2primus',hypothesisId:'H1,H3'})}).catch(()=>{});
+      // #endregion
+
+      let data: any;
+      try {
+        data = await ship2PrimusRequest<any>(urlWithQuery, {
+          method: 'GET',
+        });
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'rates.ts:callRatesAPI:afterShip2PrimusRequest',message:'ship2PrimusRequest completed',data:{hasData:!!data,topLevelKeys:data?Object.keys(data):[]},timestamp:Date.now(),runId:'debug-ship2primus',hypothesisId:'H1,H3,H4'})}).catch(()=>{});
+        // #endregion
+      } catch (error: any) {
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'rates.ts:callRatesAPI:ship2PrimusRequestError',message:'ship2PrimusRequest failed',data:{errorName:error?.name,errorMessage:error?.message,errorCode:error?.code,errorCause:error?.cause?.code,isSocketError:error?.message?.includes('closed')||error?.code==='UND_ERR_SOCKET',errorStack:error?.stack?.substring(0,500)},timestamp:Date.now(),runId:'debug-ship2primus',hypothesisId:'H1,H3,H5'})}).catch(()=>{});
+        // #endregion
+        throw error;
+      }
+
+      console.log('[RATES] Ship2Primus API response received:', {
+        hasData: !!data,
+        topLevelKeys: data ? Object.keys(data) : [],
+        hasNestedData: !!(data as any)?.data,
+        hasResults: !!(data as any)?.data?.results,
+        ratesLength: Array.isArray((data as any)?.data?.results?.rates) ? (data as any).data.results.rates.length : null,
+        fullResponse: process.env.NODE_ENV === 'development' ? JSON.stringify(data, null, 2).substring(0, 1000) : '[truncated in production]',
+      });
+
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'rates.ts:callRatesAPI:responseData',message:'Full API response structure',data:{hasData:!!data,dataKeys:data?Object.keys(data):[],hasNestedData:!!(data as any)?.data,nestedDataKeys:(data as any)?.data?Object.keys((data as any).data):[],hasResults:!!(data as any)?.data?.results,resultsKeys:(data as any)?.data?.results?Object.keys((data as any).data.results):[],ratesLength:Array.isArray((data as any)?.data?.results?.rates)?(data as any).data.results.rates.length:null,fullResponseStructure:JSON.stringify(data).substring(0,2000)},timestamp:Date.now(),runId:'debug-ship2primus',hypothesisId:'H2,H4'})}).catch(()=>{});
+      // #endregion
 
       // #region agent log
       fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{
@@ -287,9 +313,17 @@ async function callRatesAPI(requestBody: any): Promise<any> {
 
       // Handle Ship2Primus response format
       const rates = data?.data?.results?.rates;
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'rates.ts:callRatesAPI:extractRates',message:'Extracting rates from response',data:{hasData:!!data,hasNestedData:!!data?.data,hasResults:!!data?.data?.results,hasRates:!!rates,ratesIsArray:Array.isArray(rates),ratesLength:Array.isArray(rates)?rates.length:null,resultsKeys:(data as any)?.data?.results?Object.keys((data as any).data.results):[],fullResponseSample:JSON.stringify(data).substring(0,1500)},timestamp:Date.now(),runId:'debug-ship2primus',hypothesisId:'H2,H4'})}).catch(()=>{});
+      // #endregion
       if (rates) {
+        console.log('[RATES] Ship2Primus returned', rates.length, 'rates');
+        if (rates.length === 0) {
+          console.warn('[RATES] Ship2Primus returned 0 rates. Possible causes: invalid placeholders (defaultCity/defaultState), no matching carriers, or invalid request parameters');
+        }
         return { rates };
       }
+      console.log('[RATES] Ship2Primus response format unexpected, returning full data');
       return data;
     } else if (apiGatewayUrl) {
       console.log('[RATES] Calling legacy API Gateway proxy for rates:', {
@@ -309,10 +343,18 @@ async function callRatesAPI(requestBody: any): Promise<any> {
         throw new Error(`API Gateway returned ${response.status}`);
       }
 
+      console.log('[RATES] API Gateway response status:', response.status, response.statusText);
       const data = await response.json() as any;
+      console.log('[RATES] API Gateway response data:', {
+        hasData: !!data,
+        topLevelKeys: data ? Object.keys(data) : [],
+        ratesLength: Array.isArray(data?.data?.results?.rates) ? data.data.results.rates.length : null,
+        fullResponse: process.env.NODE_ENV === 'development' ? JSON.stringify(data, null, 2).substring(0, 1000) : '[truncated in production]',
+      });
       // Handle Lambda-style response format: data.results.rates
       const rates = data?.data?.results?.rates;
       if (rates) {
+        console.log('[RATES] API Gateway returned', rates.length, 'rates');
         return { rates };
       }
       return data;
@@ -363,8 +405,8 @@ async function callRatesAPI(requestBody: any): Promise<any> {
  */
 async function upsertHubSpotContactIfOptedIn(user: {
   email: string;
-  first_name?: string | null;
-  last_name?: string | null;
+  firstname?: string | null;
+  lastname?: string | null;
   hubspot_opt_in?: boolean | null;
 }) {
   const accessToken = process.env.HUBSPOT_ACCESS_TOKEN;
@@ -395,8 +437,8 @@ async function upsertHubSpotContactIfOptedIn(user: {
   }
 
   const email = user.email;
-  const firstName = user.first_name || undefined;
-  const lastName = user.last_name || undefined;
+  const firstName = user.firstname || undefined;
+  const lastName = user.lastname || undefined;
 
   if (!email) {
     console.warn('[HUBSPOT] Skipping contact upsert: missing email');
@@ -569,7 +611,7 @@ router.post('/rates', authenticateToken, validateBody(rateRequestSchema), async 
       const [{ data: userRow, error: userError }, { data: clientRow, error: clientError }] = await Promise.all([
         supabaseAdmin
           .from('users')
-          .select('id, email, first_name, last_name, hubspot_opt_in')
+          .select('id, email, firstname, lastname, hubspot_opt_in')
           .eq('id', userId)
           .single(),
         supabaseAdmin
@@ -654,21 +696,41 @@ router.post('/rates', authenticateToken, validateBody(rateRequestSchema), async 
       });
     }
 
+    console.log('[RATES] Processing API response:', {
+      hasRates: !!apiResponse.rates,
+      ratesIsArray: Array.isArray(apiResponse.rates),
+      hasDataResults: !!apiResponse?.data?.results?.rates,
+      dataResultsIsArray: Array.isArray(apiResponse?.data?.results?.rates),
+      apiResponseIsArray: Array.isArray(apiResponse),
+      hasRate: !!apiResponse.rate,
+      topLevelKeys: apiResponse ? Object.keys(apiResponse) : [],
+    });
+
     // Extract rates from response - handle different possible response formats
     // Lambda returns: { rates: [...] } or { data: { results: { rates: [...] } } }
     let rates: any[] = [];
     if (Array.isArray(apiResponse.rates)) {
       rates = apiResponse.rates;
+      console.log('[RATES] Extracted rates from apiResponse.rates:', rates.length);
     } else if (apiResponse?.data?.results?.rates && Array.isArray(apiResponse.data.results.rates)) {
       rates = apiResponse.data.results.rates;
+      console.log('[RATES] Extracted rates from apiResponse.data.results.rates:', rates.length);
     } else if (Array.isArray(apiResponse)) {
       rates = apiResponse;
+      console.log('[RATES] Extracted rates from apiResponse (array):', rates.length);
     } else if (apiResponse.rate) {
       rates = [apiResponse.rate];
+      console.log('[RATES] Extracted single rate from apiResponse.rate');
+    } else {
+      console.warn('[RATES] No rates found in API response. Full response:', JSON.stringify(apiResponse, null, 2).substring(0, 500));
     }
     
     // Filter out empty rate errors (matching Lambda behavior)
+    const beforeFilter = rates.length;
     rates = rates.filter((r: any) => !(r?.error && String(r.error).includes('Empty rate')));
+    if (beforeFilter !== rates.length) {
+      console.log(`[RATES] Filtered out ${beforeFilter - rates.length} empty rate errors`);
+    }
 
     // Honor backend no-rates message (matching Lambda behavior)
     if (!rates || rates.length === 0) {
@@ -824,6 +886,20 @@ router.post('/rates', authenticateToken, validateBody(rateRequestSchema), async 
     if (process.env.NODE_ENV === 'development' && rates.length > 0) {
       console.log('[RATES] Sample rate structure:', JSON.stringify(rates[0], null, 2));
     }
+
+    // Log final response before sending
+    console.log('[RATES] Sending response to client:', {
+      requestId,
+      ratesCount: rates.length,
+      firstRate: rates[0] ? {
+        carrier: rates[0].name || rates[0].carrierName || 'Unknown',
+        service: rates[0].serviceName || rates[0].serviceLevel || 'Unknown',
+        price: rates[0].total || rates[0].totalCost || 0,
+      } : null,
+      rateTokensRemaining,
+      rateTokensUsed,
+      quoteId: quoteId || null,
+    });
 
     // Return response matching existing JS expected format, with additional token metadata
     res.json({

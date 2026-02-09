@@ -1,5 +1,3 @@
-import React from 'react';
-
 interface ContactS2MessageProps {
   reason: 'rate_limit' | 'hazmat' | 'error' | 'no_rates';
   customMessage?: string;

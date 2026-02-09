@@ -20,6 +20,7 @@ export async function authenticateToken(
     const token = req.cookies?.token || req.headers.authorization?.replace('Bearer ', '');
 
     if (!token) {
+      console.log('[Auth] No token found in cookies or headers');
       return res.status(401).json({
         requestId: crypto.randomUUID(),
         errorCode: 'UNAUTHORIZED',
@@ -39,6 +40,8 @@ export async function authenticateToken(
       role: 'ADMIN' | 'USER';
     };
 
+    console.log('[Auth] Token decoded:', { userId: decoded.userId, email: decoded.email, clientId: decoded.clientId });
+
     // Verify user still exists and is active
     const { data: user, error: userError } = await supabaseAdmin
       .from('users')
@@ -55,13 +58,25 @@ export async function authenticateToken(
       .eq('id', decoded.userId)
       .single();
 
-    if (userError || !user || user.client_id !== decoded.clientId) {
+    if (userError) {
+      console.error('[Auth] User lookup failed:', { userId: decoded.userId, error: userError.message });
       return res.status(401).json({
         requestId: crypto.randomUUID(),
         errorCode: 'UNAUTHORIZED',
         message: 'Invalid token',
       });
     }
+
+    if (!user || user.client_id !== decoded.clientId) {
+      console.warn('[Auth] User not found or client mismatch:', { userId: decoded.userId, hasUser: !!user, userClientId: user?.client_id, tokenClientId: decoded.clientId });
+      return res.status(401).json({
+        requestId: crypto.randomUUID(),
+        errorCode: 'UNAUTHORIZED',
+        message: 'Invalid token',
+      });
+    }
+
+    console.log('[Auth] User authenticated:', { id: user.id, email: user.email, clientId: user.client_id });
 
     // Handle both snake_case and camelCase from database
     const clientId = (user as any).client_id || (user as any).clientId || decoded.clientId;

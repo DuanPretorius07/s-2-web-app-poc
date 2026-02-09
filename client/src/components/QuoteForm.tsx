@@ -1,22 +1,27 @@
-import React, { useState } from 'react';
+import { useState, type FormEvent } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import ContactS2Message from './ContactS2Message';
 
 interface QuoteFormData {
   originCountry: string;
-  originZip: string;
-  destCountry: string;
-  destZip: string;
+  originCity: string;
+  originState: string;
+  originZipcode: string;
+  destinationCountry: string;
+  destinationCity: string;
+  destinationState: string;
+  destinationZipcode: string;
   pickupDate: string;
   freightType: string;
-  packingType: string;
+  packagingType: string;
   quantity: number;
-  length: number;
-  width: number;
-  height: number;
-  weight: number;
-  stackable: boolean;
-  hazmat: boolean;
+  length: string;
+  width: string;
+  height: string;
+  weight: string;
+  stackable: string;
+  stacks: string;
+  hazmat: string;
 }
 
 interface RateResult {
@@ -33,27 +38,44 @@ const COUNTRIES = [
   { code: 'MX', name: 'Mexico' },
 ];
 
-const FREIGHT_TYPES = ['General Cargo', 'Palletized', 'Crated', 'Loose'];
+// Match backend API expectations
+const FREIGHT_TYPES = [
+  { value: '', label: 'Please Select' },
+  { value: 'LTL', label: 'LTL' },
+  { value: 'GUARANTEED', label: 'Guaranteed' },
+  { value: 'SP', label: 'Small Package' },
+  { value: 'VOL', label: 'Volume' },
+  { value: 'AIR', label: 'Air' },
+];
 
-const PACKING_TYPES = ['Wooden Crate', 'Cardboard Box', 'Pallet', 'No Packing'];
+const PACKAGING_TYPES = [
+  { value: 'PLT', label: 'Pallet' },
+  { value: 'CTN', label: 'Carton' },
+  { value: 'DRM', label: 'Drum' },
+];
 
 export default function QuoteForm() {
   const { user } = useAuth();
   const [formData, setFormData] = useState<QuoteFormData>({
     originCountry: 'US',
-    originZip: '',
-    destCountry: 'US',
-    destZip: '',
+    originCity: '',
+    originState: '',
+    originZipcode: '',
+    destinationCountry: 'US',
+    destinationCity: '',
+    destinationState: '',
+    destinationZipcode: '',
     pickupDate: '',
-    freightType: FREIGHT_TYPES[0],
-    packingType: PACKING_TYPES[0],
+    freightType: '',
+    packagingType: 'PLT',
     quantity: 1,
-    length: 0,
-    width: 0,
-    height: 0,
-    weight: 0,
-    stackable: false,
-    hazmat: false,
+    length: '',
+    width: '',
+    height: '',
+    weight: '',
+    stackable: 'No',
+    stacks: '1',
+    hazmat: '',
   });
 
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -78,9 +100,9 @@ export default function QuoteForm() {
     }
 
     // Show hazmat warning if hazmat is selected
-    if (field === 'hazmat' && value === true) {
+    if (field === 'hazmat' && value === 'Yes') {
       setShowHazmatWarning(true);
-    } else if (field === 'hazmat' && value === false) {
+    } else if (field === 'hazmat' && value !== 'Yes') {
       setShowHazmatWarning(false);
     }
   };
@@ -88,8 +110,12 @@ export default function QuoteForm() {
   const validateForm = (): boolean => {
     const newErrors: Record<string, string> = {};
 
-    if (!formData.originZip) newErrors.originZip = 'Origin ZIP code is required';
-    if (!formData.destZip) newErrors.destZip = 'Destination ZIP code is required';
+    if (!formData.originCity.trim()) newErrors.originCity = 'Origin city is required';
+    if (!formData.originState.trim()) newErrors.originState = 'Origin state is required';
+    if (!formData.originZipcode.trim()) newErrors.originZipcode = 'Origin ZIP code is required';
+    if (!formData.destinationCity.trim()) newErrors.destinationCity = 'Destination city is required';
+    if (!formData.destinationState.trim()) newErrors.destinationState = 'Destination state is required';
+    if (!formData.destinationZipcode.trim()) newErrors.destinationZipcode = 'Destination ZIP code is required';
     if (!formData.pickupDate) newErrors.pickupDate = 'Pickup date is required';
 
     // Date must be today or future
@@ -101,16 +127,22 @@ export default function QuoteForm() {
     }
 
     if (formData.quantity < 1) newErrors.quantity = 'Quantity must be at least 1';
-    if (formData.length <= 0) newErrors.length = 'Length must be greater than 0';
-    if (formData.width <= 0) newErrors.width = 'Width must be greater than 0';
-    if (formData.height <= 0) newErrors.height = 'Height must be greater than 0';
-    if (formData.weight <= 0) newErrors.weight = 'Weight must be greater than 0';
+    
+    const lengthNum = parseFloat(formData.length);
+    const widthNum = parseFloat(formData.width);
+    const heightNum = parseFloat(formData.height);
+    const weightNum = parseFloat(formData.weight);
+    
+    if (!formData.length || isNaN(lengthNum) || lengthNum <= 0) newErrors.length = 'Length must be greater than 0';
+    if (!formData.width || isNaN(widthNum) || widthNum <= 0) newErrors.width = 'Width must be greater than 0';
+    if (!formData.height || isNaN(heightNum) || heightNum <= 0) newErrors.height = 'Height must be greater than 0';
+    if (!formData.weight || isNaN(weightNum) || weightNum <= 0) newErrors.weight = 'Weight must be greater than 0';
 
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
 
     setContactReason(null);
@@ -118,7 +150,7 @@ export default function QuoteForm() {
     setRates([]);
 
     // Block if hazmat is selected
-    if (formData.hazmat) {
+    if (formData.hazmat === 'Yes') {
       setShowHazmatWarning(true);
       setContactReason('hazmat');
       return;
@@ -131,23 +163,66 @@ export default function QuoteForm() {
     setIsSubmitting(true);
 
     try {
-      // Build simple payload expected by new /api/rates handler
-      const payload = {
-        originCountry: formData.originCountry,
-        originZip: formData.originZip,
-        destCountry: formData.destCountry,
-        destZip: formData.destZip,
-        pickupDate: formData.pickupDate,
-        freightType: formData.freightType,
-        packingType: formData.packingType,
-        quantity: formData.quantity,
-        length: formData.length,
-        width: formData.width,
-        height: formData.height,
-        weight: formData.weight,
-        stackable: formData.stackable,
-        hazmat: formData.hazmat,
+      // Normalize freight type to match backend expectations
+      const normalizeFreightType = (raw: string): string[] => {
+        const v = (raw || '').toString().trim().toUpperCase();
+        const DEFAULT_ALL = ['LTL', 'GUARANTEED', 'SP', 'VOL'];
+        const SUPPORTED = ['LTL', 'GUARANTEED', 'SP', 'VOL', 'AIR'];
+        
+        if (!v || v === 'ALL' || v === 'PLEASE SELECT') {
+          return DEFAULT_ALL;
+        } else if (SUPPORTED.includes(v)) {
+          return [v];
+        } else {
+          return DEFAULT_ALL;
+        }
       };
+
+      const stackableYes = formData.stackable === 'Yes';
+      const isStackable = stackableYes;
+      const stackAmount = isStackable ? (parseInt(formData.stacks, 10) || 0) : 0;
+
+      // Build payload matching backend API schema exactly
+      const rateTypes = normalizeFreightType(formData.freightType);
+      const payload = {
+        originCity: formData.originCity.trim(),
+        originState: formData.originState.trim(),
+        originZipcode: formData.originZipcode.trim(),
+        originCountry: formData.originCountry || 'US',
+        destinationCity: formData.destinationCity.trim(),
+        destinationState: formData.destinationState.trim(),
+        destinationZipcode: formData.destinationZipcode.trim(),
+        destinationCountry: formData.destinationCountry || 'US',
+        UOM: 'US',
+        pickupDate: formData.pickupDate,
+        freightInfo: [{
+          qty: formData.quantity,
+          dimType: formData.packagingType || 'PLT',
+          weight: parseFloat(formData.weight) || 0,
+          weightType: 'each',
+          length: parseFloat(formData.length) || 0,
+          width: parseFloat(formData.width) || 0,
+          height: parseFloat(formData.height) || 0,
+          volume: 0,
+          hazmat: formData.hazmat === 'Yes',
+          class: 0,
+          stack: isStackable,
+          stackAmount: isStackable ? stackAmount : 1,
+        }],
+        rateTypesList: rateTypes,
+      };
+
+      console.log('[QuoteForm] Submitting rate request:', {
+        originCity: payload.originCity,
+        originState: payload.originState,
+        originZipcode: payload.originZipcode,
+        destinationCity: payload.destinationCity,
+        destinationState: payload.destinationState,
+        destinationZipcode: payload.destinationZipcode,
+        pickupDate: payload.pickupDate,
+        rateTypesList: payload.rateTypesList,
+        freightInfo: payload.freightInfo[0],
+      });
 
       const response = await fetch('/api/rates', {
         method: 'POST',
@@ -158,9 +233,27 @@ export default function QuoteForm() {
         body: JSON.stringify(payload),
       });
 
+      console.log('[QuoteForm] Response status:', response.status, response.statusText);
+      console.log('[QuoteForm] Response ok:', response.ok);
+
       const data = await response.json();
+      console.log('[QuoteForm] Response data:', {
+        hasRates: !!data.rates,
+        ratesCount: Array.isArray(data.rates) ? data.rates.length : 0,
+        errorCode: data.errorCode,
+        message: data.message,
+        rateTokensRemaining: data.rateTokensRemaining,
+        rateTokensUsed: data.rateTokensUsed,
+      });
 
       if (!response.ok) {
+        console.error('[QuoteForm] Error response:', {
+          status: response.status,
+          errorCode: data.errorCode,
+          message: data.message,
+          fullData: data,
+        });
+
         // Handle specific error cases
         if (data.errorCode === 'RATE_LIMIT_EXCEEDED') {
           setContactReason('rate_limit');
@@ -181,19 +274,43 @@ export default function QuoteForm() {
         return;
       }
 
-      const receivedRates: RateResult[] = Array.isArray(data.rates) ? data.rates : [];
+      // Transform backend rates to display format
+      const receivedRates: RateResult[] = Array.isArray(data.rates)
+        ? data.rates.map((rate: any) => ({
+            carrier: rate.name || rate.carrierName || 'Unknown',
+            service: rate.serviceName || rate.serviceLevel || 'Standard',
+            price: rate.total || rate.totalCost || 0,
+            transit_days: rate.transitDays || null,
+            eta: rate.eta,
+          }))
+        : [];
+
+      console.log('[QuoteForm] SUCCESS - Rates received:', {
+        count: receivedRates.length,
+        rates: receivedRates.map(r => ({
+          carrier: r.carrier,
+          service: r.service,
+          price: r.price,
+          transit_days: r.transit_days,
+        })),
+      });
 
       if (!receivedRates.length) {
+        console.warn('[QuoteForm] No rates in response');
         setContactReason('no_rates');
         setGeneralMessage(
-          data.message || 'No rates are currently available for this shipping lane.'
+          data.message || data.userMessage || 'No rates are currently available for this shipping lane.'
         );
         return;
       }
 
       setRates(receivedRates);
     } catch (error) {
-      console.error('Error submitting quote request:', error);
+      console.error('[QuoteForm] Exception during rate request:', {
+        error,
+        errorMessage: error instanceof Error ? error.message : String(error),
+        errorStack: error instanceof Error ? error.stack : undefined,
+      });
       setContactReason('error');
       setGeneralMessage('An error occurred. Please try again or contact support.');
     } finally {
@@ -231,7 +348,7 @@ export default function QuoteForm() {
               <button
                 onClick={() => {
                   setShowHazmatWarning(false);
-                  handleChange('hazmat', false);
+                  handleChange('hazmat', 'No');
                 }}
                 className="flex-1 bg-gray-200 text-gray-800 py-2 px-4 rounded hover:bg-gray-300 font-semibold"
               >
@@ -263,6 +380,7 @@ export default function QuoteForm() {
           </h2>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {/* Origin Fields */}
             <div>
               <label className="block text-sm font-medium mb-1 text-gray-700">
                 Origin Country
@@ -282,29 +400,67 @@ export default function QuoteForm() {
 
             <div>
               <label className="block text-sm font-medium mb-1 text-gray-700">
-                Origin ZIP Code *
+                Origin City *
               </label>
               <input
                 type="text"
-                value={formData.originZip}
-                onChange={(e) => handleChange('originZip', e.target.value)}
+                value={formData.originCity}
+                onChange={(e) => handleChange('originCity', e.target.value)}
                 className={`w-full border rounded px-3 py-2 text-sm shadow-sm focus:ring-s2-red focus:border-s2-red ${
-                  errors.originZip ? 'border-red-500' : 'border-gray-300'
+                  errors.originCity ? 'border-red-500' : 'border-gray-300'
                 }`}
-                placeholder="e.g., 90210"
+                placeholder="e.g., Seattle"
               />
-              {errors.originZip && (
-                <p className="text-red-500 text-xs mt-1">{errors.originZip}</p>
+              {errors.originCity && (
+                <p className="text-red-500 text-xs mt-1">{errors.originCity}</p>
               )}
             </div>
 
             <div>
               <label className="block text-sm font-medium mb-1 text-gray-700">
+                Origin State *
+              </label>
+              <input
+                type="text"
+                value={formData.originState}
+                onChange={(e) => handleChange('originState', e.target.value)}
+                className={`w-full border rounded px-3 py-2 text-sm shadow-sm focus:ring-s2-red focus:border-s2-red ${
+                  errors.originState ? 'border-red-500' : 'border-gray-300'
+                }`}
+                placeholder="e.g., WA"
+                maxLength={2}
+              />
+              {errors.originState && (
+                <p className="text-red-500 text-xs mt-1">{errors.originState}</p>
+              )}
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium mb-1 text-gray-700">
+                Origin ZIP Code *
+              </label>
+              <input
+                type="text"
+                value={formData.originZipcode}
+                onChange={(e) => handleChange('originZipcode', e.target.value)}
+                className={`w-full border rounded px-3 py-2 text-sm shadow-sm focus:ring-s2-red focus:border-s2-red ${
+                  errors.originZipcode ? 'border-red-500' : 'border-gray-300'
+                }`}
+                placeholder="e.g., 98122"
+              />
+              {errors.originZipcode && (
+                <p className="text-red-500 text-xs mt-1">{errors.originZipcode}</p>
+              )}
+            </div>
+
+            {/* Destination Fields */}
+            <div>
+              <label className="block text-sm font-medium mb-1 text-gray-700">
                 Destination Country
               </label>
               <select
-                value={formData.destCountry}
-                onChange={(e) => handleChange('destCountry', e.target.value)}
+                value={formData.destinationCountry}
+                onChange={(e) => handleChange('destinationCountry', e.target.value)}
                 className="w-full border rounded px-3 py-2 text-sm shadow-sm focus:ring-s2-red focus:border-s2-red"
               >
                 {COUNTRIES.map((country) => (
@@ -317,19 +473,56 @@ export default function QuoteForm() {
 
             <div>
               <label className="block text-sm font-medium mb-1 text-gray-700">
+                Destination City *
+              </label>
+              <input
+                type="text"
+                value={formData.destinationCity}
+                onChange={(e) => handleChange('destinationCity', e.target.value)}
+                className={`w-full border rounded px-3 py-2 text-sm shadow-sm focus:ring-s2-red focus:border-s2-red ${
+                  errors.destinationCity ? 'border-red-500' : 'border-gray-300'
+                }`}
+                placeholder="e.g., Boston"
+              />
+              {errors.destinationCity && (
+                <p className="text-red-500 text-xs mt-1">{errors.destinationCity}</p>
+              )}
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium mb-1 text-gray-700">
+                Destination State *
+              </label>
+              <input
+                type="text"
+                value={formData.destinationState}
+                onChange={(e) => handleChange('destinationState', e.target.value)}
+                className={`w-full border rounded px-3 py-2 text-sm shadow-sm focus:ring-s2-red focus:border-s2-red ${
+                  errors.destinationState ? 'border-red-500' : 'border-gray-300'
+                }`}
+                placeholder="e.g., MA"
+                maxLength={2}
+              />
+              {errors.destinationState && (
+                <p className="text-red-500 text-xs mt-1">{errors.destinationState}</p>
+              )}
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium mb-1 text-gray-700">
                 Destination ZIP Code *
               </label>
               <input
                 type="text"
-                value={formData.destZip}
-                onChange={(e) => handleChange('destZip', e.target.value)}
+                value={formData.destinationZipcode}
+                onChange={(e) => handleChange('destinationZipcode', e.target.value)}
                 className={`w-full border rounded px-3 py-2 text-sm shadow-sm focus:ring-s2-red focus:border-s2-red ${
-                  errors.destZip ? 'border-red-500' : 'border-gray-300'
+                  errors.destinationZipcode ? 'border-red-500' : 'border-gray-300'
                 }`}
-                placeholder="e.g., 10001"
+                placeholder="e.g., 02139"
               />
-              {errors.destZip && (
-                <p className="text-red-500 text-xs mt-1">{errors.destZip}</p>
+              {errors.destinationZipcode && (
+                <p className="text-red-500 text-xs mt-1">{errors.destinationZipcode}</p>
               )}
             </div>
           </div>
@@ -370,8 +563,8 @@ export default function QuoteForm() {
                 className="w-full border rounded px-3 py-2 text-sm shadow-sm focus:ring-s2-red focus:border-s2-red"
               >
                 {FREIGHT_TYPES.map((type) => (
-                  <option key={type} value={type}>
-                    {type}
+                  <option key={type.value} value={type.value}>
+                    {type.label}
                   </option>
                 ))}
               </select>
@@ -379,16 +572,16 @@ export default function QuoteForm() {
 
             <div>
               <label className="block text-sm font-medium mb-1 text-gray-700">
-                Packing Type
+                Packaging Type
               </label>
               <select
-                value={formData.packingType}
-                onChange={(e) => handleChange('packingType', e.target.value)}
+                value={formData.packagingType}
+                onChange={(e) => handleChange('packagingType', e.target.value)}
                 className="w-full border rounded px-3 py-2 text-sm shadow-sm focus:ring-s2-red focus:border-s2-red"
               >
-                {PACKING_TYPES.map((type) => (
-                  <option key={type} value={type}>
-                    {type}
+                {PACKAGING_TYPES.map((type) => (
+                  <option key={type.value} value={type.value}>
+                    {type.label}
                   </option>
                 ))}
               </select>
@@ -428,12 +621,11 @@ export default function QuoteForm() {
                   min="0"
                   step="0.1"
                   value={formData.length}
-                  onChange={(e) =>
-                    handleChange('length', parseFloat(e.target.value) || 0)
-                  }
+                  onChange={(e) => handleChange('length', e.target.value)}
                   className={`w-full border rounded px-3 py-2 text-sm shadow-sm focus:ring-s2-red focus:border-s2-red ${
                     errors.length ? 'border-red-500' : 'border-gray-300'
                   }`}
+                  placeholder="0"
                 />
                 {errors.length && (
                   <p className="text-red-500 text-xs mt-1">{errors.length}</p>
@@ -447,12 +639,11 @@ export default function QuoteForm() {
                   min="0"
                   step="0.1"
                   value={formData.width}
-                  onChange={(e) =>
-                    handleChange('width', parseFloat(e.target.value) || 0)
-                  }
+                  onChange={(e) => handleChange('width', e.target.value)}
                   className={`w-full border rounded px-3 py-2 text-sm shadow-sm focus:ring-s2-red focus:border-s2-red ${
                     errors.width ? 'border-red-500' : 'border-gray-300'
                   }`}
+                  placeholder="0"
                 />
                 {errors.width && (
                   <p className="text-red-500 text-xs mt-1">{errors.width}</p>
@@ -466,12 +657,11 @@ export default function QuoteForm() {
                   min="0"
                   step="0.1"
                   value={formData.height}
-                  onChange={(e) =>
-                    handleChange('height', parseFloat(e.target.value) || 0)
-                  }
+                  onChange={(e) => handleChange('height', e.target.value)}
                   className={`w-full border rounded px-3 py-2 text-sm shadow-sm focus:ring-s2-red focus:border-s2-red ${
                     errors.height ? 'border-red-500' : 'border-gray-300'
                   }`}
+                  placeholder="0"
                 />
                 {errors.height && (
                   <p className="text-red-500 text-xs mt-1">{errors.height}</p>
@@ -490,50 +680,81 @@ export default function QuoteForm() {
               min="0"
               step="0.1"
               value={formData.weight}
-              onChange={(e) =>
-                handleChange('weight', parseFloat(e.target.value) || 0)
-              }
+              onChange={(e) => handleChange('weight', e.target.value)}
               className={`w-full border rounded px-3 py-2 text-sm shadow-sm focus:ring-s2-red focus:border-s2-red ${
                 errors.weight ? 'border-red-500' : 'border-gray-300'
               }`}
+              placeholder="0"
             />
             {errors.weight && (
               <p className="text-red-500 text-xs mt-1">{errors.weight}</p>
             )}
           </div>
 
-          {/* Checkboxes */}
-          <div className="mt-4 space-y-2">
-            <label className="flex items-center text-sm text-gray-700">
-              <input
-                type="checkbox"
-                checked={formData.stackable}
-                onChange={(e) => handleChange('stackable', e.target.checked)}
-                className="mr-2 h-4 w-4 text-s2-red border-gray-300 rounded focus:ring-s2-red"
-              />
-              <span>Stackable</span>
-            </label>
+          {/* Stackable */}
+          <div className="mt-4">
+            <label className="block text-sm font-medium mb-2 text-gray-700">Stackable</label>
+            <div className="flex gap-6">
+              <label className="flex items-center">
+                <input
+                  type="radio"
+                  name="stackable"
+                  value="Yes"
+                  checked={formData.stackable === 'Yes'}
+                  onChange={(e) => handleChange('stackable', e.target.value)}
+                  className="mr-2"
+                />
+                Yes
+              </label>
+              <label className="flex items-center">
+                <input
+                  type="radio"
+                  name="stackable"
+                  value="No"
+                  checked={formData.stackable === 'No'}
+                  onChange={(e) => handleChange('stackable', e.target.value)}
+                  className="mr-2"
+                />
+                No
+              </label>
+            </div>
+            {formData.stackable === 'Yes' && (
+              <div className="mt-4">
+                <label className="block text-sm font-medium mb-1 text-gray-700">
+                  Stack Amount
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  value={formData.stacks}
+                  onChange={(e) => handleChange('stacks', e.target.value)}
+                  className="w-full border rounded px-3 py-2 text-sm shadow-sm focus:ring-s2-red focus:border-s2-red"
+                />
+              </div>
+            )}
+          </div>
 
-            <label className="flex items-center text-sm">
-              <input
-                type="checkbox"
-                checked={formData.hazmat}
-                onChange={(e) => handleChange('hazmat', e.target.checked)}
-                className="mr-2 h-4 w-4 text-red-600 border-red-300 rounded focus:ring-red-500"
-              />
-              <span className="text-red-600 font-medium">
-                Hazardous Materials (Hazmat)
-              </span>
-            </label>
+          {/* Hazmat */}
+          <div className="mt-4">
+            <label className="block text-sm font-medium mb-2 text-gray-700">Hazmat</label>
+            <select
+              value={formData.hazmat}
+              onChange={(e) => handleChange('hazmat', e.target.value)}
+              className="w-full border rounded px-3 py-2 text-sm shadow-sm focus:ring-s2-red focus:border-s2-red"
+            >
+              <option value="">Please Select</option>
+              <option value="Yes">Yes</option>
+              <option value="No">No</option>
+            </select>
           </div>
         </div>
 
         {/* Submit Button */}
         <button
           type="submit"
-          disabled={isSubmitting || formData.hazmat}
+          disabled={isSubmitting || formData.hazmat === 'Yes'}
           className={`w-full py-3 px-6 rounded-lg font-semibold text-sm sm:text-base shadow-md hover:shadow-lg transition-colors ${
-            isSubmitting || formData.hazmat
+            isSubmitting || formData.hazmat === 'Yes'
               ? 'bg-gray-400 cursor-not-allowed text-white'
               : 'bg-s2-red hover:bg-s2-red-dark text-white'
           }`}
