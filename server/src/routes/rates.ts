@@ -4,7 +4,7 @@ import { supabaseAdmin } from '../lib/supabaseClient.js';
 import { authenticateToken, AuthRequest } from '../middleware/auth.js';
 import { validateBody } from '../middleware/validation.js';
 import { NormalizedRate } from '../types.js';
-import { ship2PrimusRequest } from '../lib/ship2primusClient.js';
+import { getShip2PrimusToken, ship2PrimusRequest } from '../lib/ship2primusClient.js';
 
 const router = Router();
 
@@ -114,15 +114,15 @@ function buildFreightInfo(freightInfoArray: any[]): any[] {
  * Forward request to API Gateway or Ship2Primus - payload forwarded with enhancements
  */
 async function callRatesAPI(requestBody: any): Promise<any> {
-  // Check if API Gateway URL is configured (for backward compatibility with existing JS frontend)
+  // Prefer direct Ship2Primus URL; fall back to legacy API Gateway only if Ship2Primus is not configured
   const apiGatewayUrl = process.env.API_GATEWAY_RATES_URL;
   const ship2PrimusUrl = process.env.SHIP2PRIMUS_RATES_URL;
 
-  const apiUrl = apiGatewayUrl || ship2PrimusUrl;
+  const apiUrl = ship2PrimusUrl || apiGatewayUrl;
 
   if (!apiUrl) {
     // Mock response for development - matching existing JS response format
-    console.warn('API_GATEWAY_RATES_URL or SHIP2PRIMUS_RATES_URL not configured, returning mock data');
+    console.warn('[RATES] API urls not configured; returning mock data (no Ship2Primus call).');
     return {
       rates: [
         {
@@ -184,8 +184,117 @@ async function callRatesAPI(requestBody: any): Promise<any> {
       freightInfo: buildFreightInfo(requestBody.freightInfo || []),
     };
 
-    // Use API Gateway if configured, otherwise use Ship2Primus client (which handles auth)
-    if (apiGatewayUrl) {
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        sessionId:'debug-session',
+        runId:'pre-fix',
+        hypothesisId:'H-AUTH-VENDOR-RATETYPES',
+        location:'rates.ts:callRatesAPI:entry',
+        message:'callRatesAPI enhancedBody summary',
+        data:{
+          hasVendorIdList:Array.isArray((requestBody as any)?.vendorIdList) && (requestBody as any).vendorIdList.length>0,
+          vendorIdListLength:Array.isArray((requestBody as any)?.vendorIdList)?(requestBody as any).vendorIdList.length:null,
+          rateTypesListLength:Array.isArray((requestBody as any)?.rateTypesList)?(requestBody as any).rateTypesList.length:null,
+          hasFreightInfo:Array.isArray((requestBody as any)?.freightInfo),
+          ship2PrimusUrlConfigured:!!process.env.SHIP2PRIMUS_RATES_URL
+        },
+        timestamp:Date.now()
+      })
+    }).catch(()=>{});
+    // #endregion
+
+    // Use Ship2Primus client if configured, otherwise fall back to legacy API Gateway
+    if (ship2PrimusUrl) {
+      console.log('[RATES] Calling Ship2Primus directly:', {
+        url: ship2PrimusUrl,
+      });
+
+      // Ship2Primus /applet/v1/rate/multiple expects a GET with querystring params,
+      // not a JSON POST body. Build the querystring similarly to the original Lambda.
+      const { freightInfo, rateTypesList, ...rest } = enhancedBody as any;
+
+      const qs = new URLSearchParams();
+      // Basic scalar fields
+      Object.entries(rest).forEach(([key, value]) => {
+        if (value === undefined || value === null) return;
+        qs.set(key, String(value));
+      });
+      // Freight info as JSON string
+      if (freightInfo) {
+        qs.set('freightInfo', JSON.stringify(freightInfo));
+      }
+      // Rate types list as repeated params: rateTypesList[]=LTL&rateTypesList[]=SP
+      if (Array.isArray(rateTypesList)) {
+        rateTypesList.forEach((rt: string) => {
+          if (rt) qs.append('rateTypesList[]', rt);
+        });
+      }
+
+      const urlWithQuery =
+        ship2PrimusUrl.includes('?')
+          ? `${ship2PrimusUrl}&${qs.toString()}`
+          : `${ship2PrimusUrl}?${qs.toString()}`;
+
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({
+          sessionId:'debug-session',
+          runId:'pre-fix',
+          hypothesisId:'H-VENDOR-QUERYSTRING',
+          location:'rates.ts:callRatesAPI:Ship2PrimusURL',
+          message:'Ship2Primus GET URL + query characteristics',
+          data:{
+            urlLength:urlWithQuery.length,
+            hasVendorIdListParam:qs.has('vendorIdList[]'),
+            rateTypesListParamCount:qs.getAll('rateTypesList[]').length,
+            hasFreightInfoParam:qs.has('freightInfo')
+          },
+          timestamp:Date.now()
+        })
+      }).catch(()=>{});
+      // #endregion
+
+      const data = await ship2PrimusRequest<any>(urlWithQuery, {
+        method: 'GET',
+      });
+
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({
+          sessionId:'debug-session',
+          runId:'rates-ship2primus',
+          hypothesisId:'H1',
+          location:'rates.ts:callRatesAPI:Ship2Primus',
+          message:'Ship2Primus raw response meta',
+          data:{
+            hasData: !!data,
+            topLevelKeys: data ? Object.keys(data) : [],
+            hasNestedData: !!(data as any)?.data,
+            hasResults: !!(data as any)?.data?.results,
+            ratesLength: Array.isArray((data as any)?.data?.results?.rates) ? (data as any).data.results.rates.length : null
+          },
+          timestamp:Date.now()
+        })
+      }).catch(()=>{});
+      // #endregion
+
+      // Handle Ship2Primus response format
+      const rates = data?.data?.results?.rates;
+      if (rates) {
+        return { rates };
+      }
+      return data;
+    } else if (apiGatewayUrl) {
+      console.log('[RATES] Calling legacy API Gateway proxy for rates:', {
+        url: apiGatewayUrl,
+      });
       const apiKey = process.env.PROXY_API_KEY;
       const response = await fetch(apiUrl, {
         method: 'POST',
@@ -222,7 +331,141 @@ async function callRatesAPI(requestBody: any): Promise<any> {
     }
   } catch (error: any) {
     console.error('[RATES] API error:', error);
+
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        sessionId:'debug-session',
+        runId:'pre-fix',
+        hypothesisId:'H-SOCKET-ERROR',
+        location:'rates.ts:callRatesAPI:catch',
+        message:'callRatesAPI caught error',
+        data:{
+          name:error?.name || null,
+          code:error?.code || error?.cause?.code || null,
+          message:error?.message || null
+        },
+        timestamp:Date.now()
+      })
+    }).catch(()=>{});
+    // #endregion
+
     throw error;
+  }
+}
+
+/**
+ * Upsert (create or update) a HubSpot contact record when the user has opted in.
+ * - Uses email as the unique key
+ * - Never blocks the main flow; all errors are logged and swallowed
+ */
+async function upsertHubSpotContactIfOptedIn(user: {
+  email: string;
+  first_name?: string | null;
+  last_name?: string | null;
+  hubspot_opt_in?: boolean | null;
+}) {
+  const accessToken = process.env.HUBSPOT_ACCESS_TOKEN;
+
+  // #region agent log
+  fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({
+      sessionId:'debug-session',
+      runId:'hubspot-pre',
+      hypothesisId:'H-HUBSPOT-CONDITION',
+      location:'rates.ts:upsertHubSpotContactIfOptedIn:entry',
+      message:'HubSpot upsert helper invoked',
+      data:{
+        hasToken:!!accessToken,
+        hubspotOptIn:!!user?.hubspot_opt_in,
+        hasEmail:!!user?.email
+      },
+      timestamp:Date.now()
+    })
+  }).catch(()=>{});
+  // #endregion
+
+  // If HubSpot is not configured or user has not opted in, do nothing
+  if (!accessToken || !user?.hubspot_opt_in) {
+    return;
+  }
+
+  const email = user.email;
+  const firstName = user.first_name || undefined;
+  const lastName = user.last_name || undefined;
+
+  if (!email) {
+    console.warn('[HUBSPOT] Skipping contact upsert: missing email');
+    return;
+  }
+
+  try {
+    // STEP 1: Search for existing contact by email
+    const searchResponse = await fetch('https://api.hubapi.com/crm/v3/objects/contacts/search', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({
+        filterGroups: [
+          {
+            filters: [
+              {
+                propertyName: 'email',
+                operator: 'EQ',
+                value: email,
+              },
+            ],
+          },
+        ],
+      }),
+    });
+
+    if (!searchResponse.ok) {
+      console.warn('[HUBSPOT] Contact search failed', { status: searchResponse.status });
+      return;
+    }
+
+    const searchData = await searchResponse.json() as any;
+    const existingContact = Array.isArray(searchData.results) && searchData.results.length > 0
+      ? searchData.results[0]
+      : null;
+
+    const baseProperties: Record<string, string> = {
+      email,
+    };
+    if (firstName) baseProperties.firstname = firstName;
+    if (lastName) baseProperties.lastname = lastName;
+
+    // STEP 2: Update existing contact or create new one
+    if (existingContact) {
+      const contactId = existingContact.id;
+      await fetch(`https://api.hubapi.com/crm/v3/objects/contacts/${contactId}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({ properties: baseProperties }),
+      });
+    } else {
+      await fetch('https://api.hubapi.com/crm/v3/objects/contacts', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({ properties: baseProperties }),
+      });
+    }
+  } catch (error) {
+    // HubSpot failures must never block rates; log and continue
+    console.error('[HUBSPOT] Contact upsert error (non-blocking):', error);
   }
 }
 
@@ -319,7 +562,85 @@ router.post('/rates', authenticateToken, validateBody(rateRequestSchema), async 
     // Request body matches exact structure from existing JS: originCity, originState, freightInfo, etc.
     const requestPayload = req.body;
 
-    // Forward request to API Gateway or Ship2Primus - payload forwarded UNCHANGED (per requirements)
+    // Load user and client metadata needed for HubSpot and rate token enforcement
+    let dbUser: any = null;
+    let clientMeta: any = null;
+    try {
+      const [{ data: userRow, error: userError }, { data: clientRow, error: clientError }] = await Promise.all([
+        supabaseAdmin
+          .from('users')
+          .select('id, email, first_name, last_name, hubspot_opt_in')
+          .eq('id', userId)
+          .single(),
+        supabaseAdmin
+          .from('clients')
+          .select('id, rate_tokens_remaining, rate_tokens_used')
+          .eq('id', clientId)
+          .single(),
+      ]);
+
+      if (userError) {
+        console.warn('[RATES] Failed to load user metadata for HubSpot', { userId, error: userError.message });
+      } else {
+        dbUser = userRow;
+      }
+
+      if (clientError) {
+        console.warn('[RATES] Failed to load client token metadata', { clientId, error: clientError.message });
+      } else {
+        clientMeta = clientRow;
+      }
+
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({
+          sessionId:'debug-session',
+          runId:'hubspot-pre',
+          hypothesisId:'H-HUBSPOT-META',
+          location:'rates.ts:/rates:metaLoaded',
+          message:'Loaded user/client metadata for HubSpot + tokens',
+          data:{
+            hasDbUser:!!dbUser,
+            hubspotOptIn:dbUser?.hubspot_opt_in ?? null,
+            hasClientMeta:!!clientMeta,
+            rateTokensRemaining:clientMeta?.rate_tokens_remaining ?? null,
+            rateTokensUsed:clientMeta?.rate_tokens_used ?? null
+          },
+          timestamp:Date.now()
+        })
+      }).catch(()=>{});
+      // #endregion
+    } catch (metaError) {
+      console.warn('[RATES] Metadata preload failed (non-critical):', metaError);
+    }
+
+    // Enforce token-based rate search limit strictly from the backend
+    const configuredRemaining =
+      typeof clientMeta?.rate_tokens_remaining === 'number'
+        ? clientMeta.rate_tokens_remaining
+        : 3; // default starting allowance when column is unset
+
+    if (configuredRemaining <= 0) {
+      return res.status(403).json({
+        requestId,
+        errorCode: 'RATE_LIMIT_REACHED',
+        message: 'You have used all 3 rate searches. Please contact Ship2Primus directly.',
+      });
+    }
+
+    console.log('[RATES] Incoming request', {
+      requestId,
+      userId,
+      clientId,
+      originZipcode: requestPayload.originZipcode,
+      destinationZipcode: requestPayload.destinationZipcode,
+      pickupDate: requestPayload.pickupDate,
+      modes: requestPayload.rateTypesList,
+    });
+
+    // Forward request to Ship2Primus (or legacy proxy) - payload forwarded UNCHANGED (per requirements)
     let apiResponse: any;
     try {
       apiResponse = await callRatesAPI(requestPayload);
@@ -364,6 +685,52 @@ router.post('/rates', authenticateToken, validateBody(rateRequestSchema), async 
         selectedModes: rateTypes,
         rates: [],
       });
+    }
+
+    // At this point we have at least one valid rate; consume exactly one token atomically.
+    // This uses a Postgres function (consume_rate_token) for strict, server-enforced limits.
+    let rateTokensRemaining: number | null = null;
+    let rateTokensUsed: number | null = null;
+    try {
+      const { data: tokenResult, error: tokenError } = await supabaseAdmin
+        .rpc('consume_rate_token', { p_client_id: clientId });
+
+      if (tokenError) {
+        console.warn('[RATES] Failed to consume rate token (non-blocking):', tokenError.message);
+      } else if (tokenResult) {
+        rateTokensRemaining = (tokenResult as any).rate_tokens_remaining ?? null;
+        rateTokensUsed = (tokenResult as any).rate_tokens_used ?? null;
+      }
+    } catch (tokenRpcError) {
+      console.warn('[RATES] Token RPC error (non-blocking):', tokenRpcError);
+    }
+
+    // Fire HubSpot contact upsert for opted-in users; never block the response
+    if (dbUser) {
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({
+          sessionId:'debug-session',
+          runId:'hubspot-pre',
+          hypothesisId:'H-HUBSPOT-INVOKE',
+          location:'rates.ts:/rates:invokeUpsert',
+          message:'Invoking HubSpot upsert after successful rates',
+          data:{
+            hasDbUser:true,
+            hubspotOptIn:dbUser?.hubspot_opt_in ?? null,
+            hasToken:!!process.env.HUBSPOT_ACCESS_TOKEN
+          },
+          timestamp:Date.now()
+        })
+      }).catch(()=>{});
+      // #endregion
+
+      // Intentionally not awaited with try/catch here, as upsertHubSpotContactIfOptedIn
+      // already encapsulates its own error handling.
+      // eslint-disable-next-line @typescript-eslint/no-floating-promises
+      upsertHubSpotContactIfOptedIn(dbUser);
     }
 
     // Sort rates cheapest first (matching Lambda behavior)
@@ -458,10 +825,12 @@ router.post('/rates', authenticateToken, validateBody(rateRequestSchema), async 
       console.log('[RATES] Sample rate structure:', JSON.stringify(rates[0], null, 2));
     }
 
-    // Return response matching existing JS expected format
+    // Return response matching existing JS expected format, with additional token metadata
     res.json({
       requestId,
       quoteId: quoteId || undefined, // Include quoteId if available for booking
+      rateTokensRemaining,
+      rateTokensUsed,
       rates: rates.map((rate: any) => {
         // Extract carrier name - check multiple possible field names
         // Priority: name > carrierName > carrier_name > carrier > companyName > company

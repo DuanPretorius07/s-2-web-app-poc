@@ -58,6 +58,10 @@ export default function Navbar({ currentPath, userEmail, onLogout }: NavbarProps
               >
                 Get Rates
               </Link>
+              {/*
+                History navigation is disabled per client request.
+                To restore it in the future, uncomment the block below.
+
               <Link
                 to="/history"
                 className={`inline-flex items-center px-1 pt-1 border-b-2 text-sm font-semibold transition-colors h-16 ${
@@ -68,6 +72,7 @@ export default function Navbar({ currentPath, userEmail, onLogout }: NavbarProps
               >
                 History
               </Link>
+              */}
             </div>
           </div>
           <div className="flex items-center">

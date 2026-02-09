@@ -9,6 +9,7 @@
     "test": "NODE_ENV=test jest"
   },
   "dependencies": {
+    "@prisma/client": "^6.6.0",
     "@supabase/supabase-js": "^2.39.0",
     "bcrypt": "^5.1.1",
     "cookie-parser": "^1.4.6",
@@ -17,6 +18,8 @@
     "express": "^4.18.2",
     "express-rate-limit": "^7.1.5",
     "jsonwebtoken": "^9.0.2",
+    "prisma": "^6.6.0",
+    "resend": "^6.9.1",
     "zod": "^3.22.4"
   },
   "devDependencies": {

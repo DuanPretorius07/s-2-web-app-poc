@@ -20,6 +20,8 @@ CREATE TABLE users (
   client_id UUID NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
   email TEXT NOT NULL UNIQUE,
   password_hash TEXT NOT NULL,
+  first_name TEXT,
+  last_name TEXT,
   role user_role NOT NULL DEFAULT 'USER',
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

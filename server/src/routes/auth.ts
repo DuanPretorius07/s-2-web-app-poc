@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { supabaseAdmin } from '../lib/supabaseClient.js';
 import { authenticateToken, requireAdmin, AuthRequest } from '../middleware/auth.js';
 import { validateBody } from '../middleware/validation.js';
+import { upsertContact } from '../services/hubspot.js';
 
 const router = Router();
 
@@ -21,9 +22,18 @@ const inviteSchema = z.object({
 const registerSchema = z.object({
   email: z.string().email(),
   password: z.string().min(8),
+  firstName: z.string().min(1),
+  lastName: z.string().min(1),
   inviteToken: z.string().optional(),
   clientName: z.string().min(1).optional(),
 });
+
+function isUnknownColumnError(err: any, columnName: string) {
+  const msg = typeof err?.message === 'string' ? err.message : '';
+  const code = typeof err?.code === 'string' ? err.code : '';
+  // Postgres undefined_column is 42703; PostgREST may surface schema-cache messages.
+  return code === '42703' || msg.toLowerCase().includes(columnName.toLowerCase());
+}
 
 function generateToken(user: { id: string; client_id: string; email: string; role: string }) {
   const secret = process.env.JWT_SECRET;
@@ -60,17 +70,7 @@ router.post('/login', validateBody(loginSchema), async (req, res) => {
 
     const { data: user, error: userError } = await supabaseAdmin
       .from('users')
-      .select(`
-        id,
-        email,
-        password_hash,
-        role,
-        client_id,
-        clients (
-          id,
-          name
-        )
-      `)
+      .select(`*, clients ( id, name )`)
       .eq('email', email)
       .single();
 
@@ -92,6 +92,18 @@ router.post('/login', validateBody(loginSchema), async (req, res) => {
       });
     }
 
+    const client = Array.isArray((user as any).clients) ? (user as any).clients[0] : (user as any).clients;
+
+    // Sync to HubSpot asynchronously (non-blocking)
+    upsertContact({
+      email: user.email,
+      firstname: (user as any).firstname || (user as any).first_name || '',
+      lastname: (user as any).lastname || (user as any).last_name || '',
+      company: client?.name || undefined,
+    }).catch((err) => {
+      console.error('[Login] HubSpot upsert failed (non-blocking):', err);
+    });
+
     const token = generateToken({
       id: user.id,
       client_id: user.client_id,
@@ -107,7 +119,6 @@ router.post('/login', validateBody(loginSchema), async (req, res) => {
       metadata_json: { email: user.email },
     });
 
-    const client = Array.isArray(user.clients) ? user.clients[0] : user.clients;
     console.log('[LOGIN] Success, sending response', { userId: user.id });
     res.json({
       user: {
@@ -116,6 +127,8 @@ router.post('/login', validateBody(loginSchema), async (req, res) => {
         role: user.role,
         clientId: user.client_id,
         clientName: client?.name || '',
+        firstName: (user as any).firstName || (user as any).firstname || (user as any).first_name || undefined,
+        lastName: (user as any).lastName || (user as any).lastname || (user as any).last_name || undefined,
       },
     });
   } catch (error: any) {
@@ -245,7 +258,26 @@ router.post(
 // POST /api/auth/register (with invite token or create new client)
 router.post('/register', validateBody(registerSchema), async (req, res) => {
   try {
-    const { email, password, inviteToken, clientName } = req.body;
+    const { email, password, firstName, lastName, inviteToken, clientName } = req.body;
+
+    // #region agent log
+    ;(globalThis as any).fetch?.('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        sessionId: 'debug-session',
+        runId: 'pre-fix',
+        hypothesisId: 'H1,H2,H3,H4',
+        location: 'server/src/routes/auth.ts:register',
+        message: 'register-start',
+        data: {
+          hasInviteToken: !!inviteToken,
+          hasClientName: !!clientName,
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
 
     // Check if user already exists
     const { data: existing, error: existingError } = await supabaseAdmin
@@ -253,6 +285,27 @@ router.post('/register', validateBody(registerSchema), async (req, res) => {
       .select('id')
       .eq('email', email)
       .single();
+
+    // #region agent log
+    ;(globalThis as any).fetch?.('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        sessionId: 'debug-session',
+        runId: 'pre-fix',
+        hypothesisId: 'H2',
+        location: 'server/src/routes/auth.ts:register',
+        message: 'register-existing-check',
+        data: {
+          hasExisting: !!existing,
+          hasExistingError: !!existingError,
+          existingErrorMessage: existingError ? (existingError as any).message : undefined,
+          existingErrorCode: existingError ? (existingError as any).code : undefined,
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
 
     if (existing) {
       return res.status(400).json({
@@ -280,7 +333,28 @@ router.post('/register', validateBody(registerSchema), async (req, res) => {
         .insert({ name: clientName })
         .select('id')
         .single();
-      
+
+      // #region agent log
+      ;(globalThis as any).fetch?.('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sessionId: 'debug-session',
+          runId: 'pre-fix',
+          hypothesisId: 'H1',
+          location: 'server/src/routes/auth.ts:register',
+          message: 'register-client-insert-inviteToken',
+          data: {
+            hasClient: !!client,
+            hasClientError: !!clientError,
+            clientErrorMessage: clientError ? (clientError as any).message : undefined,
+            clientErrorCode: clientError ? (clientError as any).code : undefined,
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
+
       if (clientError || !client) {
         throw new Error('Failed to create client');
       }
@@ -292,7 +366,28 @@ router.post('/register', validateBody(registerSchema), async (req, res) => {
         .insert({ name: clientName })
         .select('id')
         .single();
-      
+
+      // #region agent log
+      ;(globalThis as any).fetch?.('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sessionId: 'debug-session',
+          runId: 'pre-fix',
+          hypothesisId: 'H1',
+          location: 'server/src/routes/auth.ts:register',
+          message: 'register-client-insert-noInviteToken',
+          data: {
+            hasClient: !!client,
+            hasClientError: !!clientError,
+            clientErrorMessage: clientError ? (clientError as any).message : undefined,
+            clientErrorCode: clientError ? (clientError as any).code : undefined,
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
+
       if (clientError || !client) {
         throw new Error('Failed to create client');
       }
@@ -305,30 +400,108 @@ router.post('/register', validateBody(registerSchema), async (req, res) => {
       });
     }
 
+    // #region agent log
+    ;(globalThis as any).fetch?.('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        sessionId: 'debug-session',
+        runId: 'pre-fix',
+        hypothesisId: 'H3',
+        location: 'server/src/routes/auth.ts:register',
+        message: 'register-before-bcrypt-hash',
+        data: {
+          hasPassword: typeof password === 'string' && password.length > 0,
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
+
     const passwordHash = await bcrypt.hash(password, 10);
 
-    const { data: user, error: userError } = await supabaseAdmin
-      .from('users')
-      .insert({
-        email,
-        password_hash: passwordHash,
-        client_id: clientId,
-        role: 'ADMIN', // First user is admin
-      })
-      .select(`
-        id,
-        email,
-        role,
-        client_id,
-        clients (
-          id,
-          name
-        )
-      `)
-      .single();
+    // #region agent log
+    ;(globalThis as any).fetch?.('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        sessionId: 'debug-session',
+        runId: 'pre-fix',
+        hypothesisId: 'H3',
+        location: 'server/src/routes/auth.ts:register',
+        message: 'register-after-bcrypt-hash',
+        data: {
+          hashLength: typeof passwordHash === 'string' ? passwordHash.length : null,
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
+
+    // Try camelCase columns (firstname/lastname) first, then fall back to snake_case (first_name/last_name)
+    let user: any = null;
+    let userError: any = null;
+
+    const attemptInsert = async (mode: 'camel' | 'snake') => {
+      const nameFields =
+        mode === 'camel'
+          ? { firstname: firstName, lastname: lastName }
+          : { first_name: firstName, last_name: lastName };
+
+      return await supabaseAdmin
+        .from('users')
+        .insert({
+          email,
+          ...nameFields,
+          password_hash: passwordHash,
+          client_id: clientId,
+          role: 'ADMIN', // First user is admin
+        })
+        .select(`*, clients ( id, name )`)
+        .single();
+    };
+
+    ({ data: user, error: userError } = await attemptInsert('camel'));
+    if (userError && isUnknownColumnError(userError, 'firstname')) {
+      ({ data: user, error: userError } = await attemptInsert('snake'));
+    }
+
+    console.log('=== USER INSERT RESULT ===');
+    console.log('Has user:', !!user);
+    console.log('Has error:', !!userError);
+    if (userError) {
+      console.error('User error (raw):', userError);
+      try {
+        console.error('User error (json):', JSON.stringify(userError, null, 2));
+      } catch {}
+    }
+    console.log('========================');
+
+    // #region agent log
+    ;(globalThis as any).fetch?.('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        sessionId: 'debug-session',
+        runId: 'pre-fix',
+        hypothesisId: 'H1,H2',
+        location: 'server/src/routes/auth.ts:register',
+        message: 'register-user-insert-result',
+        data: {
+          hasUser: !!user,
+          hasUserError: !!userError,
+          userErrorMessage: userError ? (userError as any).message : undefined,
+          userErrorCode: userError ? (userError as any).code : undefined,
+          userErrorDetails: userError ? (userError as any).details : undefined,
+          userErrorHint: userError ? (userError as any).hint : undefined,
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
 
     if (userError || !user) {
-      throw new Error('Failed to create user');
+      throw new Error(`Failed to create user: ${userError?.message || 'Unknown error'}`);
     }
 
     const token = generateToken({
@@ -339,7 +512,18 @@ router.post('/register', validateBody(registerSchema), async (req, res) => {
     });
     setTokenCookie(res, token);
 
-    const client = Array.isArray(user.clients) ? user.clients[0] : user.clients;
+    const client = Array.isArray((user as any).clients) ? (user as any).clients[0] : (user as any).clients;
+
+    // Sync to HubSpot asynchronously (non-blocking)
+    upsertContact({
+      email: user.email,
+      firstname: firstName,
+      lastname: lastName,
+      company: client?.name || clientName || undefined,
+    }).catch((err) => {
+      console.error('[Register] HubSpot upsert failed (non-blocking):', err);
+    });
+
     res.status(201).json({
       user: {
         id: user.id,
@@ -347,23 +531,43 @@ router.post('/register', validateBody(registerSchema), async (req, res) => {
         role: user.role,
         clientId: user.client_id,
         clientName: client?.name || '',
+        firstName,
+        lastName,
       },
     });
   } catch (error: any) {
-    console.error('[REGISTER] Error:', error);
+    console.error('=== REGISTRATION ERROR ===');
+    console.error('Error message:', error?.message);
+    console.error('Error code:', error?.code);
+    console.error('Error details:', error?.details);
+    console.error('Error hint:', error?.hint);
+    try {
+      console.error('Full error object:', JSON.stringify(error, null, 2));
+    } catch {
+      console.error('Full error object: (non-serializable)', error);
+    }
+    console.error('Stack trace:', error?.stack);
+    console.error('========================');
     
     // Ensure response hasn't been sent
     if (!res.headersSent) {
-    res.status(500).json({
-      requestId: crypto.randomUUID(),
-      errorCode: 'INTERNAL_ERROR',
-        message: error?.message || 'Registration failed',
-        details: process.env.NODE_ENV === 'development' ? error?.stack : undefined,
-    });
+      res.status(500).json({
+        requestId: crypto.randomUUID(),
+        errorCode: 'INTERNAL_ERROR',
+        message: 'Failed to create user',
+        details: error?.message || 'Unknown error',
+        supabaseError: error?.code || null,
+      });
     } else {
       console.error('[REGISTER] Response already sent, cannot send error response');
     }
   }
 });
+
+/*
+// Password reset removed - will be implemented in a future phase
+// router.post('/forgot-password', ...);
+// router.post('/reset-password', ...);
+*/
 
 export default router;

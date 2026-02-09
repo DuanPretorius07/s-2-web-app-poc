@@ -6,6 +6,12 @@ interface User {
   role: 'ADMIN' | 'USER';
   clientId: string;
   clientName: string;
+  firstName?: string;
+  lastName?: string;
+  // Remaining rate search tokens for this account (server source of truth)
+  rateTokensRemaining?: number | null;
+  // Total consumed rate search tokens
+  rateTokensUsed?: number | null;
 }
 
 interface AuthContextType {
@@ -13,7 +19,16 @@ interface AuthContextType {
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
-  register: (email: string, password: string, clientName: string) => Promise<void>;
+  register: (input: {
+    email: string;
+    password: string;
+    firstName: string;
+    lastName: string;
+    companyName?: string;
+    hubspotOptIn: boolean;
+  }) => Promise<void>;
+  // Allow pages (e.g. rates) to update token counts after a successful search
+  updateRateTokens: (remaining: number | null | undefined, used: number | null | undefined) => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -80,15 +95,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(null);
   }
 
-  async function register(email: string, password: string, clientName: string) {
+  async function register(input: {
+    email: string;
+    password: string;
+    firstName: string;
+    lastName: string;
+    companyName?: string;
+    hubspotOptIn: boolean;
+  }) {
+    const { email, password, firstName, lastName, companyName, hubspotOptIn } = input;
     // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'AuthContext.tsx:70',message:'Register request start',data:{email,hasClientName:!!clientName},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+    fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'AuthContext.tsx:70',message:'Register request start',data:{email,hasCompanyName:!!companyName},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
     // #endregion
     const response = await fetch('/api/auth/register', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
-      body: JSON.stringify({ email, password, clientName }),
+      body: JSON.stringify({
+        email,
+        password,
+        firstName,
+        lastName,
+        clientName: companyName,
+        hubspotOptIn,
+      }),
     });
 
     // #region agent log
@@ -124,8 +154,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(data.user);
   }
 
+  // Centralized helper so pages can update token counts while keeping server as source of truth
+  function updateRateTokens(remaining: number | null | undefined, used: number | null | undefined) {
+    setUser((prev) =>
+      prev
+        ? {
+            ...prev,
+            rateTokensRemaining: typeof remaining === 'number' ? remaining : prev.rateTokensRemaining ?? remaining ?? null,
+            rateTokensUsed: typeof used === 'number' ? used : prev.rateTokensUsed ?? used ?? null,
+          }
+        : prev
+    );
+  }
+
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout, register }}>
+    <AuthContext.Provider value={{ user, loading, login, logout, register, updateRateTokens }}>
       {children}
     </AuthContext.Provider>
   );

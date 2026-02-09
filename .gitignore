@@ -35,5 +35,13 @@ lerna-debug.log*
 *.sln
 *.sw?
 
+# Cursor
+.cursor/
+.cursor/debug.log
+
+# Zip archives
+*.zip
+
+
 # Prisma
 server/prisma/migrations/

@@ -57,9 +57,15 @@ export async function getShip2PrimusToken(): Promise<string> {
     }
 
     const data = await response.json() as Ship2PrimusAuthResponse;
-    
+
     // Handle different possible response formats
-    const token = data.token || data.access_token || data.authToken;
+    // Known formats:
+    // - { token }
+    // - { access_token }
+    // - { authToken }
+    // - { data: { accessToken } }  // Ship2Primus current login response
+    const nestedAccessToken = (data as any)?.data?.accessToken;
+    const token = data.token || data.access_token || data.authToken || nestedAccessToken;
     
     if (!token) {
       throw new Error('No authentication token received from Ship2Primus API');
@@ -95,6 +101,25 @@ export async function ship2PrimusRequest<T>(
   });
 
   if (!response.ok) {
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        sessionId:'debug-session',
+        runId:'pre-fix',
+        hypothesisId:'H-AUTH-STATUS',
+        location:'ship2primusClient.ts:ship2PrimusRequest:nonOk',
+        message:'Ship2Primus non-OK HTTP status',
+        data:{
+          status:response.status,
+          statusText:response.statusText
+        },
+        timestamp:Date.now()
+      })
+    }).catch(()=>{});
+    // #endregion
+
     // If unauthorized, clear token cache and retry once
     if (response.status === 401 && cachedToken) {
       cachedToken = null;

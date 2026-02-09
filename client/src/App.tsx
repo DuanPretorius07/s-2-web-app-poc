@@ -2,11 +2,14 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import Login from './pages/Login';
 import RatesForm from './pages/RatesForm';
-import History from './pages/History';
-import QuoteDetail from './pages/QuoteDetail';
-import BookingDetail from './pages/BookingDetail';
+// NOTE: History-related pages are intentionally commented out per client request.
+// They remain in the codebase for future use but are not exposed in the UI.
+// import History from './pages/History';
+// import QuoteDetail from './pages/QuoteDetail';
+// import BookingDetail from './pages/BookingDetail';
 import ProtectedRoute from './components/ProtectedRoute';
 import HubSpotEmbed from './components/HubSpotEmbed';
+import HelpButton from './components/HelpButton';
 
 function AppRoutes() {
   const { user, loading } = useAuth();
@@ -30,6 +33,10 @@ function AppRoutes() {
           </ProtectedRoute>
         }
       />
+      {/*
+        History and detail routes are disabled for now.
+        They can be re-enabled by uncommenting these routes when the client is ready.
+
       <Route
         path="/history"
         element={
@@ -54,6 +61,7 @@ function AppRoutes() {
           </ProtectedRoute>
         }
       />
+      */}
     </Routes>
   );
 }
@@ -64,6 +72,7 @@ function App() {
       <AuthProvider>
         <HubSpotEmbed>
           <AppRoutes />
+          <HelpButton />
         </HubSpotEmbed>
       </AuthProvider>
     </BrowserRouter>
