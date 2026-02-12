@@ -2,6 +2,7 @@
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import fs from 'fs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -234,7 +235,88 @@ app.get('/api/test/supabase', async (req, res) => {
 
 // Serve restricted page
 app.get('/restricted', (req, res) => {
-  res.sendFile(path.join(__dirname, '../public/restricted.html'));
+  // In Vercel, __dirname is /var/task/server/dist/
+  // public/restricted.html is at /var/task/public/restricted.html
+  // Try multiple possible paths
+  const possiblePaths = [
+    path.join(__dirname, '../../public/restricted.html'), // From server/dist/ -> public/
+    path.join(__dirname, '../public/restricted.html'),   // Fallback
+    path.join(process.cwd(), 'public/restricted.html'), // From root
+  ];
+  
+  // Try to find the file
+  let filePath = possiblePaths[0];
+  for (const p of possiblePaths) {
+    try {
+      if (fs.existsSync(p)) {
+        filePath = p;
+        break;
+      }
+    } catch (err) {
+      // Continue to next path
+    }
+  }
+  
+  res.sendFile(filePath, (err) => {
+    if (err) {
+      console.error('[RESTRICTED] Error serving restricted.html:', err);
+      console.error('[RESTRICTED] Tried paths:', possiblePaths);
+      // Fallback: send HTML directly
+      res.status(200).send(`
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Access Restricted - S2 International</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+    .container {
+      background: white;
+      border-radius: 12px;
+      padding: 48px;
+      max-width: 600px;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+      text-align: center;
+    }
+    h1 { color: #1a202c; font-size: 32px; margin-bottom: 16px; }
+    p { color: #4a5568; font-size: 18px; line-height: 1.6; margin-bottom: 24px; }
+    .icon { font-size: 64px; margin-bottom: 24px; }
+    .contact-info {
+      background: #f7fafc;
+      border-radius: 8px;
+      padding: 24px;
+      margin-top: 32px;
+    }
+    a { color: #667eea; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="icon">🌍</div>
+    <h1>Access Restricted</h1>
+    <p>We're sorry, but this shipping portal is currently only available in <strong>Canada</strong> and the <strong>United States</strong>.</p>
+    <p>If you're located in one of these countries and believe this is an error, please contact our support team.</p>
+    <div class="contact-info">
+      <p><strong>Need Assistance?</strong></p>
+      <p><a href="https://www.s-2international.com/contact" target="_blank">Contact S2 International</a></p>
+    </div>
+  </div>
+</body>
+</html>
+      `);
+    }
+  });
 });
 
 // Serve static files in production (only when NOT in Vercel)
