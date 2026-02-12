@@ -80,60 +80,47 @@ export default function AnimatedBackground() {
   // #endregion
 
   return (
-    <>
-      <style>{`
-        @keyframes scroll-horizontal {
-          0% { transform: translateX(-50%); }
-          100% { transform: translateX(0); }
-        }
-      `}</style>
-      <div className="fixed inset-0 overflow-hidden pointer-events-none" style={{ zIndex: -10, backgroundColor: '#f8f8f8' }} data-animated-bg>
-        {/* Animated striped background */}
-        <div 
-          className="absolute -top-[100%] -left-[100%] w-[300%] h-[300%] flex flex-col"
-          style={{ transform: 'rotate(30deg)' }}
-          data-stripe-container
-        >
-          {stripeColors.map((color, index) => (
-            <div
-              key={index}
-              className="w-full flex items-center whitespace-nowrap overflow-hidden text-2xl font-black tracking-wider"
-              style={{
-                padding: '18px 0',
-                background: color.bg,
-                color: color.text,
-              }}
-            >
-              <div
-                className="inline-block"
-                style={{
-                  animation: 'scroll-horizontal 90s linear infinite',
-                }}
-              >
-                {textRepeat}
-              </div>
+    <div className="fixed inset-0 overflow-hidden pointer-events-none" style={{ zIndex: -10, backgroundColor: '#f8f8f8', opacity: 0.3 }} data-animated-bg>
+      {/* Static striped background - no animation */}
+      <div 
+        className="absolute -top-[100%] -left-[100%] w-[300%] h-[300%] flex flex-col"
+        style={{ transform: 'rotate(30deg)' }}
+        data-stripe-container
+      >
+        {stripeColors.map((color, index) => (
+          <div
+            key={index}
+            className="w-full flex items-center whitespace-nowrap overflow-hidden text-2xl font-black tracking-wider"
+            style={{
+              padding: '18px 0',
+              background: color.bg,
+              color: color.text,
+            }}
+          >
+            <div className="inline-block">
+              {textRepeat}
             </div>
-          ))}
-        </div>
-        
-        {/* Fade overlay gradients - fade to white/gray at edges */}
-        <div 
-          className="absolute inset-0"
-          style={{
-            background: `
-              radial-gradient(ellipse at top left, rgba(248, 248, 248, 0.7) 0%, transparent 30%),
-              radial-gradient(ellipse at top right, rgba(248, 248, 248, 0.7) 0%, transparent 30%),
-              radial-gradient(ellipse at bottom left, rgba(248, 248, 248, 0.7) 0%, transparent 30%),
-              radial-gradient(ellipse at bottom right, rgba(248, 248, 248, 0.7) 0%, transparent 30%),
-              linear-gradient(to top, rgba(248, 248, 248, 0.6) 0%, transparent 20%),
-              linear-gradient(to bottom, rgba(248, 248, 248, 0.6) 0%, transparent 20%),
-              linear-gradient(to left, rgba(248, 248, 248, 0.6) 0%, transparent 15%),
-              linear-gradient(to right, rgba(248, 248, 248, 0.6) 0%, transparent 15%)
-            `,
-            pointerEvents: 'none',
-          }}
-        />
+          </div>
+        ))}
       </div>
-    </>
+      
+      {/* Fade overlay gradients - fade to white/gray at edges */}
+      <div 
+        className="absolute inset-0"
+        style={{
+          background: `
+            radial-gradient(ellipse at top left, rgba(248, 248, 248, 0.7) 0%, transparent 30%),
+            radial-gradient(ellipse at top right, rgba(248, 248, 248, 0.7) 0%, transparent 30%),
+            radial-gradient(ellipse at bottom left, rgba(248, 248, 248, 0.7) 0%, transparent 30%),
+            radial-gradient(ellipse at bottom right, rgba(248, 248, 248, 0.7) 0%, transparent 30%),
+            linear-gradient(to top, rgba(248, 248, 248, 0.6) 0%, transparent 20%),
+            linear-gradient(to bottom, rgba(248, 248, 248, 0.6) 0%, transparent 20%),
+            linear-gradient(to left, rgba(248, 248, 248, 0.6) 0%, transparent 15%),
+            linear-gradient(to right, rgba(248, 248, 248, 0.6) 0%, transparent 15%)
+          `,
+          pointerEvents: 'none',
+        }}
+      />
+    </div>
   );
 }

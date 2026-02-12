@@ -20,12 +20,15 @@ const inviteSchema = z.object({
 });
 
 const registerSchema = z.object({
-  email: z.string().email(),
-  password: z.string().min(8),
-  firstName: z.string().min(1),
-  lastName: z.string().min(1),
+  email: z.string().email('Invalid email address'),
+  password: z.string()
+    .min(8, 'Password must be at least 8 characters')
+    .regex(/[a-zA-Z]/, 'Password must contain at least one letter')
+    .regex(/[0-9]/, 'Password must contain at least one number'),
+  firstName: z.string().min(1, 'First name is required'),
+  lastName: z.string().min(1, 'Last name is required'),
   inviteToken: z.string().optional(),
-  clientName: z.string().min(1).optional(),
+  clientName: z.string().min(1, 'Company name is required').optional(),
 });
 
 function isUnknownColumnError(err: any, columnName: string) {
@@ -94,6 +97,19 @@ router.post('/login', validateBody(loginSchema), async (req, res) => {
 
     const client = Array.isArray((user as any).clients) ? (user as any).clients[0] : (user as any).clients;
 
+    // Get rate tokens from client
+    let rateTokensRemaining: number | null = null;
+    let rateTokensUsed: number | null = null;
+    if (client?.id) {
+      const { data: clientData } = await supabaseAdmin
+        .from('clients')
+        .select('rate_tokens_remaining, rate_tokens_used')
+        .eq('id', client.id)
+        .single();
+      rateTokensRemaining = clientData?.rate_tokens_remaining ?? 3;
+      rateTokensUsed = clientData?.rate_tokens_used ?? 0;
+    }
+
     // Sync to HubSpot asynchronously (non-blocking)
     upsertContact({
       email: user.email,
@@ -129,6 +145,8 @@ router.post('/login', validateBody(loginSchema), async (req, res) => {
         clientName: client?.name || '',
         firstName: (user as any).firstName || (user as any).firstname || (user as any).first_name || undefined,
         lastName: (user as any).lastName || (user as any).lastname || (user as any).last_name || undefined,
+        rateTokensRemaining,
+        rateTokensUsed,
       },
     });
   } catch (error: any) {
@@ -167,7 +185,9 @@ router.get('/me', authenticateToken, async (req: AuthRequest, res) => {
         client_id,
         clients (
           id,
-          name
+          name,
+          rate_tokens_remaining,
+          rate_tokens_used
         )
       `)
       .eq('id', req.user!.userId)
@@ -187,6 +207,8 @@ router.get('/me', authenticateToken, async (req: AuthRequest, res) => {
         id: user.id,
         email: user.email,
         role: user.role,
+        rateTokensRemaining: client?.rate_tokens_remaining ?? 3,
+        rateTokensUsed: client?.rate_tokens_used ?? 0,
         clientId: user.client_id,
         clientName: client?.name || '',
       },

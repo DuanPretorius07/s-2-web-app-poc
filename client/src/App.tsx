@@ -10,6 +10,7 @@ import RatesForm from './pages/RatesForm';
 import ProtectedRoute from './components/ProtectedRoute';
 import HubSpotEmbed from './components/HubSpotEmbed';
 import HelpButton from './components/HelpButton';
+import RateTokensNotification from './components/RateTokensNotification';
 
 function AppRoutes() {
   const { user, loading } = useAuth();
@@ -74,6 +75,7 @@ function App() {
           <AppRoutes />
           <HelpButton />
         </HubSpotEmbed>
+        <RateTokensNotification />
       </AuthProvider>
     </BrowserRouter>
   );

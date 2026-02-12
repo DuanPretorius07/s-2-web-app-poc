@@ -8,7 +8,7 @@ export default {
     extend: {
       colors: {
         's2': {
-          'red': '#8B1538',        // Primary dark red/maroon (from S-2 International branding)
+          'red': '#8B1538',        // Primary dark red/maroon (from national branding)
           'red-dark': '#6B0F2A',   // Darker red for hover states
           'red-light': '#A91E48',  // Lighter red for accents
           'red-lighter': '#F5E6EB', // Very light red for backgrounds

@@ -13,29 +13,72 @@ export default function Login() {
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [companyName, setCompanyName] = useState('');
+  const [passwordError, setPasswordError] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const { login, register } = useAuth();
   const navigate = useNavigate();
+
+  // Password validation function
+  const validatePassword = (pwd: string): string | null => {
+    if (pwd.length < 8) {
+      return 'Password must be at least 8 characters long';
+    }
+    if (!/[a-zA-Z]/.test(pwd)) {
+      return 'Password must contain at least one letter';
+    }
+    if (!/[0-9]/.test(pwd)) {
+      return 'Password must contain at least one number';
+    }
+    return null; // Valid
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    setFieldErrors({});
+    setPasswordError(null);
     setLoading(true);
 
     try {
       if (isRegister) {
-        await register({
-          email,
-          password,
-          firstName,
-          lastName,
-          companyName: companyName || undefined,
-          // HubSpot/CRM sync is now always enabled for new registrations
-          hubspotOptIn: true,
-        });
+        // Client-side validation
+        const pwdError = validatePassword(password);
+        if (pwdError) {
+          setPasswordError(pwdError);
+          setLoading(false);
+          return;
+        }
+
+        try {
+          await register({
+            email,
+            password,
+            firstName,
+            lastName,
+            companyName: companyName || undefined,
+            // HubSpot/CRM sync is now always enabled for new registrations
+            hubspotOptIn: true,
+          });
+          navigate('/');
+        } catch (err: any) {
+          // Handle structured validation errors from backend
+          const errorData = (err as any).errorData;
+          if (errorData && errorData.errorCode === 'VALIDATION_ERROR' && errorData.errors) {
+            const errors: Record<string, string> = {};
+            errorData.errors.forEach((errItem: any) => {
+              const fieldName = errItem.field || errItem.path?.join('.') || '';
+              errors[fieldName] = errItem.message;
+            });
+            setFieldErrors(errors);
+            setError('Please fix the errors below');
+          } else {
+            setError(err.message || 'Registration failed');
+          }
+        }
       } else {
         await login(email, password);
+        navigate('/');
       }
-      navigate('/');
     } catch (err: any) {
       setError(err.message || 'Authentication failed');
     } finally {
@@ -82,11 +125,25 @@ export default function Login() {
                     name="firstName"
                     type="text"
                     required
-                    className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-t-md focus:outline-none focus:ring-s2-red focus:border-s2-red focus:z-10 sm:text-sm"
+                    className={`appearance-none rounded-none relative block w-full px-3 py-2 border ${
+                      fieldErrors.firstName ? 'border-red-500' : 'border-gray-300'
+                    } placeholder-gray-500 text-gray-900 rounded-t-md focus:outline-none focus:ring-s2-red focus:border-s2-red focus:z-10 sm:text-sm`}
                     placeholder="First name"
                     value={firstName}
-                    onChange={(e) => setFirstName(e.target.value)}
+                    onChange={(e) => {
+                      setFirstName(e.target.value);
+                      if (fieldErrors.firstName) {
+                        setFieldErrors(prev => {
+                          const newErrors = { ...prev };
+                          delete newErrors.firstName;
+                          return newErrors;
+                        });
+                      }
+                    }}
                   />
+                  {fieldErrors.firstName && (
+                    <p className="text-red-500 text-sm mt-1">{fieldErrors.firstName}</p>
+                  )}
                 </div>
                 <div>
                   <label htmlFor="last-name" className="sr-only">
@@ -97,11 +154,25 @@ export default function Login() {
                     name="lastName"
                     type="text"
                     required
-                    className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 focus:outline-none focus:ring-s2-red focus:border-s2-red focus:z-10 sm:text-sm"
+                    className={`appearance-none rounded-none relative block w-full px-3 py-2 border ${
+                      fieldErrors.lastName ? 'border-red-500' : 'border-gray-300'
+                    } placeholder-gray-500 text-gray-900 focus:outline-none focus:ring-s2-red focus:border-s2-red focus:z-10 sm:text-sm`}
                     placeholder="Last name"
                     value={lastName}
-                    onChange={(e) => setLastName(e.target.value)}
+                    onChange={(e) => {
+                      setLastName(e.target.value);
+                      if (fieldErrors.lastName) {
+                        setFieldErrors(prev => {
+                          const newErrors = { ...prev };
+                          delete newErrors.lastName;
+                          return newErrors;
+                        });
+                      }
+                    }}
                   />
+                  {fieldErrors.lastName && (
+                    <p className="text-red-500 text-sm mt-1">{fieldErrors.lastName}</p>
+                  )}
                 </div>
                 <div>
                   <label htmlFor="company-name" className="sr-only">
@@ -111,18 +182,25 @@ export default function Login() {
                     id="company-name"
                     name="companyName"
                     type="text"
-                    className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 focus:outline-none focus:ring-s2-red focus:border-s2-red focus:z-10 sm:text-sm"
+                    className={`appearance-none rounded-none relative block w-full px-3 py-2 border ${
+                      fieldErrors.clientName ? 'border-red-500' : 'border-gray-300'
+                    } placeholder-gray-500 text-gray-900 focus:outline-none focus:ring-s2-red focus:border-s2-red focus:z-10 sm:text-sm`}
                     placeholder="Company name (optional)"
                     value={companyName}
-                    onChange={(e) => setCompanyName(e.target.value)}
+                    onChange={(e) => {
+                      setCompanyName(e.target.value);
+                      if (fieldErrors.clientName) {
+                        setFieldErrors(prev => {
+                          const newErrors = { ...prev };
+                          delete newErrors.clientName;
+                          return newErrors;
+                        });
+                      }
+                    }}
                   />
-                </div>
-                {/* Informational notice about automatic CRM sync */}
-                <div className="mt-4 bg-blue-50 border border-blue-200 rounded-md p-3">
-                  <p className="text-sm text-blue-800">
-                    ℹ️ Your contact information will be automatically synced to our CRM system to provide you with the
-                    best service.
-                  </p>
+                  {fieldErrors.clientName && (
+                    <p className="text-red-500 text-sm mt-1">{fieldErrors.clientName}</p>
+                  )}
                 </div>
               </>
             )}
@@ -136,11 +214,25 @@ export default function Login() {
                 type="email"
                 autoComplete="email"
                 required
-                  className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 focus:outline-none focus:ring-s2-red focus:border-s2-red focus:z-10 sm:text-sm"
+                className={`appearance-none rounded-none relative block w-full px-3 py-2 border ${
+                  fieldErrors.email ? 'border-red-500' : 'border-gray-300'
+                } placeholder-gray-500 text-gray-900 focus:outline-none focus:ring-s2-red focus:border-s2-red focus:z-10 sm:text-sm`}
                 placeholder="Email address"
                 value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                onChange={(e) => {
+                  setEmail(e.target.value);
+                  if (fieldErrors.email) {
+                    setFieldErrors(prev => {
+                      const newErrors = { ...prev };
+                      delete newErrors.email;
+                      return newErrors;
+                    });
+                  }
+                }}
               />
+              {fieldErrors.email && (
+                <p className="text-red-500 text-sm mt-1">{fieldErrors.email}</p>
+              )}
             </div>
             <div className="relative">
               <label htmlFor="password" className="sr-only">
@@ -150,12 +242,22 @@ export default function Login() {
                 id="password"
                 name="password"
                 type={showPassword ? 'text' : 'password'}
-                autoComplete="current-password"
+                autoComplete={isRegister ? 'new-password' : 'current-password'}
                 required
-                className="appearance-none rounded-none relative block w-full px-3 pr-10 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-b-md focus:outline-none focus:ring-s2-red focus:border-s2-red focus:z-10 sm:text-sm"
+                className={`appearance-none rounded-none relative block w-full px-3 pr-10 py-2 border ${
+                  passwordError || fieldErrors.password
+                    ? 'border-red-500'
+                    : 'border-gray-300'
+                } placeholder-gray-500 text-gray-900 rounded-b-md focus:outline-none focus:ring-s2-red focus:border-s2-red focus:z-10 sm:text-sm`}
                 placeholder="Password"
                 value={password}
-                onChange={(e) => setPassword(e.target.value)}
+                onChange={(e) => {
+                  setPassword(e.target.value);
+                  if (isRegister) {
+                    const error = validatePassword(e.target.value);
+                    setPasswordError(error);
+                  }
+                }}
               />
               <button
                 type="button"
@@ -200,6 +302,31 @@ export default function Login() {
                 </svg>
               </button>
             </div>
+            {/* Password requirements and error messages */}
+            {isRegister && (
+              <div className="mt-2">
+                <div className="text-xs text-gray-600 mb-2">
+                  Password must:
+                  <ul className="list-disc ml-5 mt-1 space-y-0.5">
+                    <li className={password.length >= 8 ? 'text-green-600' : ''}>
+                      Be at least 8 characters
+                    </li>
+                    <li className={/[a-zA-Z]/.test(password) ? 'text-green-600' : ''}>
+                      Contain at least one letter
+                    </li>
+                    <li className={/[0-9]/.test(password) ? 'text-green-600' : ''}>
+                      Contain at least one number
+                    </li>
+                  </ul>
+                </div>
+                {passwordError && (
+                  <p className="text-red-500 text-sm mt-1">{passwordError}</p>
+                )}
+                {fieldErrors.password && (
+                  <p className="text-red-500 text-sm mt-1">{fieldErrors.password}</p>
+                )}
+              </div>
+            )}
           </div>
 
           {!isRegister && (
@@ -223,6 +350,15 @@ export default function Login() {
               {loading ? 'Processing...' : isRegister ? 'Register' : 'Sign in'}
             </button>
           </div>
+
+          {/* CRM sync notice - moved to bottom after submit button */}
+          {isRegister && (
+            <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-md">
+              <p className="text-xs text-blue-800 text-center">
+                ℹ️ Your contact information will be automatically synced to our CRM system to provide you with the best service.
+              </p>
+            </div>
+          )}
 
           <div className="text-center">
             <button

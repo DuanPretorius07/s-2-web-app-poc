@@ -11,17 +11,21 @@ CREATE TYPE user_role AS ENUM ('ADMIN', 'USER');
 CREATE TABLE clients (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   name TEXT NOT NULL,
+  rate_tokens_remaining INTEGER NOT NULL DEFAULT 3,
+  rate_tokens_used INTEGER NOT NULL DEFAULT 0,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 -- Users table
+-- Note: Uses camelCase (firstname/lastname) to match application code
 CREATE TABLE users (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   client_id UUID NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
   email TEXT NOT NULL UNIQUE,
   password_hash TEXT NOT NULL,
-  first_name TEXT,
-  last_name TEXT,
+  firstname TEXT,
+  lastname TEXT,
+  hubspot_opt_in BOOLEAN DEFAULT false,
   role user_role NOT NULL DEFAULT 'USER',
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

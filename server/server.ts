@@ -54,7 +54,13 @@ console.log('[SERVER] Environment check:', {
   hasServiceKey: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
   hasAnonKey: !!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
   supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL?.substring(0, 40) + '...' || 'NOT SET',
+  geonamesUsername: process.env.GEONAMES_USERNAME || 'NOT SET',
+  hasGeonamesUsername: !!process.env.GEONAMES_USERNAME,
 });
+
+// #region agent log
+fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'server.ts:env-check',message:'Environment variables check after dotenv load',data:{geonamesUsername:process.env.GEONAMES_USERNAME||'NOT_SET',hasGeonamesUsername:!!process.env.GEONAMES_USERNAME,usernameType:typeof process.env.GEONAMES_USERNAME,allGeonamesKeys:Object.keys(process.env).filter(k=>k.toLowerCase().includes('geonames')).join(',')},timestamp:Date.now(),runId:'debug-geonames-env',hypothesisId:'H3'})}).catch(()=>{});
+// #endregion
 
 // Now import everything else (supabaseClient will use the loaded env vars)
 // In Vercel, env vars are available immediately, so static imports are fine
@@ -63,10 +69,12 @@ import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import rateLimit from 'express-rate-limit';
 import { errorHandler } from './src/middleware/errorHandler.js';
+import { geoRestriction } from './src/middleware/geoRestriction.js';
 import authRoutes from './src/routes/auth.js';
 import ratesRoutes from './src/routes/rates.js';
 import bookRoutes from './src/routes/book.js';
 import historyRoutes from './src/routes/history.js';
+import locationRoutes from './src/routes/locations.js';
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -130,6 +138,18 @@ app.use(
 app.use(cookieParser());
 app.use(express.json());
 
+// Geo-restriction middleware (only in production, can be disabled if needed)
+// Apply to all routes except API and restricted page
+if (process.env.NODE_ENV === 'production' && process.env.ENABLE_GEO_RESTRICTION !== 'false') {
+  app.use((req, res, next) => {
+    // Skip geo-restriction for API routes and restricted page
+    if (req.path.startsWith('/api') || req.path === '/restricted') {
+      return next();
+    }
+    return geoRestriction(req, res, next);
+  });
+}
+
 // Rate limiting
 // keyGenerator uses req.ip which respects trust proxy setting
 const authLimiter = rateLimit({
@@ -153,6 +173,7 @@ app.use('/api/auth', authLimiter, authRoutes);
 app.use('/api', apiLimiter, ratesRoutes);
 app.use('/api', apiLimiter, bookRoutes);
 app.use('/api/history', apiLimiter, historyRoutes);
+app.use('/api/locations', apiLimiter, locationRoutes);
 
 // Health check
 app.get('/health', (req, res) => {
@@ -209,6 +230,11 @@ app.get('/api/test/supabase', async (req, res) => {
       timestamp: new Date().toISOString(),
     });
   }
+});
+
+// Serve restricted page
+app.get('/restricted', (req, res) => {
+  res.sendFile(path.join(__dirname, '../public/restricted.html'));
 });
 
 // Serve static files in production

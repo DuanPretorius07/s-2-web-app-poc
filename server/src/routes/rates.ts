@@ -511,9 +511,15 @@ async function upsertHubSpotContactIfOptedIn(user: {
   }
 }
 
-async function createHubSpotNote(contactEmail: string, rates: NormalizedRate[], dealId?: string) {
-  const accessToken = process.env.HUBSPOT_ACCESS_TOKEN;
+async function createHubSpotNote(
+  contactEmail: string,
+  rates: NormalizedRate[],
+  requestPayload: any,
+  dealId?: string
+) {
+  const accessToken = process.env.HUBSPOT_PRIVATE_APP_TOKEN || process.env.HUBSPOT_ACCESS_TOKEN;
   if (!accessToken) {
+    console.log('[HubSpot] Skipping note creation - no token configured');
     return; // Skip if not configured
   }
 
@@ -540,46 +546,87 @@ async function createHubSpotNote(contactEmail: string, rates: NormalizedRate[], 
     );
 
     if (!searchResponse.ok) {
-      console.warn('HubSpot contact search failed');
+      const errorText = await searchResponse.text();
+      console.warn('[HubSpot] Contact search failed:', searchResponse.status, errorText);
       return;
     }
 
     const searchData = await searchResponse.json() as any;
     if (!searchData.results || searchData.results.length === 0) {
+      console.log(`[HubSpot] Contact not found for email: ${contactEmail}`);
       return; // Contact not found
     }
 
     const contactId = searchData.results[0].id;
-    const topRates = rates.slice(0, 3).map(r => 
-      `${r.carrierName} ${r.serviceName}: $${r.totalCost.toFixed(2)} (${r.transitDays || 'N/A'} days)`
-    ).join('\n');
 
-    const noteBody = `Shipping Rate Request\n\nTop 3 Rates:\n${topRates}`;
+    // Build request summary (lane + key shipment inputs)
+    const origin = `${requestPayload.originCity || ''}, ${requestPayload.originState || ''} ${requestPayload.originZipcode || ''}`.trim();
+    const destination = `${requestPayload.destinationCity || ''}, ${requestPayload.destinationState || ''} ${requestPayload.destinationZipcode || ''}`.trim();
+    const lane = `${origin} → ${destination}`;
+    
+    const freightInfo = requestPayload.freightInfo?.[0] || {};
+    const shipmentDetails = [];
+    if (freightInfo.weight) shipmentDetails.push(`Weight: ${freightInfo.weight} lbs`);
+    if (freightInfo.length && freightInfo.width && freightInfo.height) {
+      shipmentDetails.push(`Dimensions: ${freightInfo.length}" × ${freightInfo.width}" × ${freightInfo.height}"`);
+    }
+    if (freightInfo.qty || requestPayload.quantity) {
+      shipmentDetails.push(`Quantity: ${freightInfo.qty || requestPayload.quantity}`);
+    }
+    if (freightInfo.dimType || requestPayload.packagingType) {
+      shipmentDetails.push(`Packaging: ${freightInfo.dimType || requestPayload.packagingType}`);
+    }
 
+    // Get top 3 cheapest rates (already sorted)
+    const top3Rates = rates.slice(0, 3).map((r, idx) => {
+      const carrier = r.carrierName || 'Unknown';
+      const service = r.serviceName || 'Standard';
+      const price = r.totalCost?.toFixed(2) || '0.00';
+      const transit = r.transitDays ? `${r.transitDays} day${r.transitDays === 1 ? '' : 's'}` : 'N/A';
+      return `${idx + 1}. ${carrier} - ${service}: $${price} (${transit})`;
+    });
+
+    // Build formatted note body with proper styling
+    const noteBody = `📦 Shipping Rate Request
+
+📍 Lane: ${lane}
+
+📋 Shipment Details:
+${shipmentDetails.map(detail => `   • ${detail}`).join('\n')}
+
+💰 Top 3 Options:
+${top3Rates.map(rate => `   ${rate}`).join('\n')}`;
+
+    // Build note payload according to HubSpot API structure
+    // Note: hs_activity_type is NOT a valid property for Notes objects
     const notePayload: any = {
       properties: {
         hs_note_body: noteBody,
+        hs_timestamp: new Date().toISOString(),
       },
-      associations: [{
-        to: { id: contactId },
-        types: [{
-          associationCategory: 'HUBSPOT_DEFINED',
-          associationTypeId: 214,
-        }],
-      }],
+      associations: [
+        {
+          to: { id: contactId },
+          types: [{
+            associationCategory: 'HUBSPOT_DEFINED',
+            associationTypeId: 202, // Note to Contact association (202, not 214)
+          }],
+        },
+      ],
     };
 
+    // Add deal association if provided
     if (dealId) {
       notePayload.associations.push({
         to: { id: dealId },
         types: [{
           associationCategory: 'HUBSPOT_DEFINED',
-          associationTypeId: 214,
+          associationTypeId: 214, // Note to Deal association (214 is correct for deals)
         }],
       });
     }
 
-    await fetch('https://api.hubapi.com/crm/v3/objects/notes', {
+    const noteResponse = await fetch('https://api.hubapi.com/crm/v3/objects/notes', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -587,8 +634,17 @@ async function createHubSpotNote(contactEmail: string, rates: NormalizedRate[], 
       },
       body: JSON.stringify(notePayload),
     });
+
+    if (!noteResponse.ok) {
+      const errorText = await noteResponse.text();
+      console.error('[HubSpot] Note creation failed:', noteResponse.status, errorText);
+      return;
+    }
+
+    const noteResult = await noteResponse.json();
+    console.log(`[HubSpot] ✅ Note created successfully for contact ${contactId}:`, noteResult.id);
   } catch (error) {
-    console.error('HubSpot note creation error:', error);
+    console.error('[HubSpot] Note creation error:', error);
     // Don't fail the request if HubSpot fails
   }
 }
@@ -885,6 +941,47 @@ router.post('/rates', authenticateToken, validateBody(rateRequestSchema), async 
     // Log first rate structure for debugging (only in development)
     if (process.env.NODE_ENV === 'development' && rates.length > 0) {
       console.log('[RATES] Sample rate structure:', JSON.stringify(rates[0], null, 2));
+    }
+
+    // Create HubSpot note if user exists and rates are available
+    if (dbUser?.email && rates.length > 0) {
+      // Normalize rates for HubSpot note
+      const normalizedRates: NormalizedRate[] = rates.map((rate: any) => {
+        const carrierName = rate.name || 
+                           rate.carrierName || 
+                           rate.carrier_name || 
+                           rate.carrier || 
+                           'Unknown';
+        const serviceName = rate.serviceName || 
+                           rate.service_name || 
+                           rate.service || 
+                           rate.serviceLevel || 
+                           'Standard';
+        const totalCost = rate.total || 
+                         rate.totalCost || 
+                         rate.total_cost || 
+                         rate.cost || 
+                         0;
+        const transitDays = rate.transitDays || 
+                          rate.transit_days || 
+                          rate.transitTime || 
+                          null;
+
+        return {
+          carrierName,
+          serviceName,
+          totalCost,
+          transitDays,
+          currency: rate.currency || 'USD',
+        };
+      });
+
+      // Extract dealId from request if available (could be in hubspotContext or query params)
+      const dealId = req.body.hubspotContext?.dealId || req.query.dealId as string | undefined;
+      
+      // Fire HubSpot note creation (non-blocking)
+      // eslint-disable-next-line @typescript-eslint/no-floating-promises
+      createHubSpotNote(dbUser.email, normalizedRates, requestPayload, dealId);
     }
 
     // Log final response before sending

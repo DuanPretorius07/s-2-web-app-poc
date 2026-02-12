@@ -9,6 +9,7 @@ interface Rate {
   transitDays?: number;
   totalCost: number;
   currency: string;
+  iconUrl?: string;
   booked?: boolean;
 }
 
@@ -53,11 +54,20 @@ export default function RatesTable({ rates, onBook, loading }: RatesTableProps) 
   });
 
   const handleBookClick = async (rateId: string) => {
+    // Prevent duplicate clicks
+    if (bookingRateId === rateId || loading) {
+      return;
+    }
+    
     setBookingRateId(rateId);
     try {
       await onBook(rateId);
     } finally {
-      setBookingRateId(null);
+      // Don't clear bookingRateId immediately - let parent component handle state
+      // This prevents rapid re-clicks
+      setTimeout(() => {
+        setBookingRateId(null);
+      }, 1000);
     }
   };
 
@@ -131,7 +141,24 @@ export default function RatesTable({ rates, onBook, loading }: RatesTableProps) 
             {sortedRates.map((rate) => (
               <tr key={rate.id} className={rate.booked ? 'bg-green-50' : ''}>
                 <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                  {rate.name || rate.carrierName}
+                  <div className="flex items-center space-x-3">
+                    {rate.iconUrl ? (
+                      <img
+                        src={rate.iconUrl}
+                        alt={rate.name || rate.carrierName}
+                        className="h-8 w-8 object-contain"
+                        onError={(e) => {
+                          // Hide image if it fails to load
+                          (e.target as HTMLImageElement).style.display = 'none';
+                        }}
+                      />
+                    ) : (
+                      <div className="h-8 w-8 bg-gray-200 rounded flex items-center justify-center text-xs font-semibold text-gray-600">
+                        {(rate.name || rate.carrierName).substring(0, 2).toUpperCase()}
+                      </div>
+                    )}
+                    <span>{rate.name || rate.carrierName}</span>
+                  </div>
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                   {rate.serviceName}
@@ -146,14 +173,46 @@ export default function RatesTable({ rates, onBook, loading }: RatesTableProps) 
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                   {rate.booked ? (
-                    <span className="text-green-600">Booked</span>
+                    <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-semibold bg-green-100 text-green-800">
+                      ✓ Booked
+                    </span>
                   ) : (
                     <button
                       onClick={() => handleBookClick(rate.id)}
                       disabled={loading || bookingRateId === rate.id}
-                      className="text-indigo-600 hover:text-indigo-900 disabled:opacity-50 disabled:cursor-not-allowed"
+                      className={`inline-flex items-center px-4 py-2 rounded-lg font-semibold text-sm shadow-md hover:shadow-lg transition-colors ${
+                        loading || bookingRateId === rate.id
+                          ? 'bg-gray-400 cursor-not-allowed text-white'
+                          : 'bg-s2-red hover:bg-s2-red-dark text-white'
+                      }`}
                     >
-                      {bookingRateId === rate.id ? 'Booking...' : 'Book'}
+                      {bookingRateId === rate.id ? (
+                        <>
+                          <svg
+                            className="animate-spin -ml-1 mr-2 h-4 w-4 text-white"
+                            xmlns="http://www.w3.org/2000/svg"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                          >
+                            <circle
+                              className="opacity-25"
+                              cx="12"
+                              cy="12"
+                              r="10"
+                              stroke="currentColor"
+                              strokeWidth="4"
+                            />
+                            <path
+                              className="opacity-75"
+                              fill="currentColor"
+                              d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                            />
+                          </svg>
+                          Booking...
+                        </>
+                      ) : (
+                        'Request to Book'
+                      )}
                     </button>
                   )}
                 </td>

@@ -11,8 +11,12 @@ export function validateBody(schema: z.ZodSchema) {
         return res.status(400).json({
           requestId: crypto.randomUUID(),
           errorCode: 'VALIDATION_ERROR',
-          message: 'Invalid request body',
-          errors: error.errors,
+          message: 'Registration validation failed',
+          errors: error.errors.map(err => ({
+            field: err.path.join('.'),
+            message: err.message,
+            path: err.path,
+          })),
         });
       }
       next(error);

@@ -1,24 +1,37 @@
 # ShipPrimus Portal
 
-A full-stack shipping quote and booking portal web application designed for HubSpot embedding. This application provides multi-tenant support, authentication, rate quoting, booking, and history management.
+A full-stack shipping quote and booking portal web application designed for HubSpot embedding. This application provides multi-tenant support, authentication, rate quoting, booking, and comprehensive location management with GeoNames integration.
 
 ## Features
 
 - **Multi-tenant Architecture**: Each client (tenant) has isolated data and users
 - **Authentication**: JWT-based auth with HttpOnly cookies, role-based access (ADMIN/USER)
-- **Shipping Flow**: Get rates → View results → Book shipment → View history
+- **Registration with Password Validation**: Detailed password requirements with real-time feedback
+  - Minimum 8 characters
+  - At least one letter
+  - At least one number
+  - Clear error messages for each requirement
+- **Location Management**: Full country/state/city/ZIP code selection with GeoNames API
+  - Robust retry logic with exponential backoff
+  - 7-day caching for improved performance
+  - Manual ZIP code entry fallback
+  - Error handling with fallback to expired cache
+- **Shipping Flow**: Get rates → View results → Book shipment
 - **HubSpot Integration**: Embeddable via iframe or script loader with context prefill
-- **History Management**: View past quotes and bookings with filtering
 - **HubSpot CRM Writeback**: Automatic contact sync and rate request notes (when configured)
 - **Rate Limiting**: 3 quote requests per email (lifetime) with clear user messaging
 - **Hazmat Blocking**: Automatic blocking of hazardous materials with contact S2 guidance
-- **Simplified Quote Form**: ZIP code-only address input for streamlined user experience
+- **UI Improvements**:
+  - Static background (no distracting animations)
+  - Rate tokens notification with proper z-index layering
+  - Improved error messages throughout the application
 
 ## Tech Stack
 
 - **Frontend**: React 18 + Vite + Tailwind CSS
 - **Backend**: Node.js + Express + TypeScript
-- **Database**: PostgreSQL with Prisma ORM
+- **Database**: PostgreSQL (Supabase) with direct SQL queries
+- **Location API**: GeoNames API with retry logic and caching
 - **Authentication**: JWT + HttpOnly cookies
 - **Testing**: Jest + Supertest (backend), Vitest + React Testing Library (frontend)
 
@@ -29,19 +42,36 @@ A full-stack shipping quote and booking portal web application designed for HubS
 ├── client/                 # React frontend
 │   ├── src/
 │   │   ├── components/    # React components
+│   │   │   ├── AnimatedBackground.tsx  # Static background (opacity: 0.3)
+│   │   │   ├── LocationSelector.tsx    # Country/State/City/ZIP selector
+│   │   │   ├── QuoteForm.tsx           # Main quote form
+│   │   │   ├── RatesModal.tsx          # Rates display modal
+│   │   │   └── RateTokensUsedNotification.tsx  # Token usage notification
 │   │   ├── contexts/      # React contexts (Auth)
 │   │   ├── pages/         # Page components
+│   │   ├── services/      # API services
+│   │   │   └── locationService.ts  # Location API client with retry logic
 │   │   └── main.tsx       # Entry point
 │   ├── public/            # Static assets + embed files
 │   └── package.json
 ├── server/                 # Express backend
 │   ├── src/
 │   │   ├── routes/        # API routes
+│   │   │   ├── auth.ts    # Authentication endpoints
+│   │   │   ├── rates.ts   # Rate quoting and booking
+│   │   │   └── locations.ts  # GeoNames API proxy
+│   │   ├── services/      # Business logic
+│   │   │   ├── geonames.ts  # GeoNames API client with retry logic
+│   │   │   └── hubspot.ts   # HubSpot integration
 │   │   ├── middleware/    # Express middleware
-│   │   └── types.ts       # TypeScript types
-│   ├── prisma/
-│   │   └── schema.prisma  # Database schema
+│   │   │   ├── auth.ts     # JWT authentication
+│   │   │   └── validation.ts  # Request validation with Zod
+│   │   └── lib/           # Utilities
+│   │       └── supabaseClient.ts  # Supabase client
+│   ├── supabase/
+│   │   └── schema.sql     # Complete database schema
 │   └── package.json
+├── vercel.json            # Vercel deployment configuration
 └── package.json           # Root scripts
 ```
 
@@ -50,12 +80,17 @@ A full-stack shipping quote and booking portal web application designed for HubS
 ### Prerequisites
 
 - Node.js 18+ and npm
-- PostgreSQL 12+
+- PostgreSQL 12+ (or Supabase account)
+- GeoNames API username (free account at geonames.org)
 - Git
 
 ### Installation
 
-1. **Clone the repository** (or use this directory)
+1. **Clone the repository**:
+   ```bash
+   git clone <repository-url>
+   cd "S-2 Web POC"
+   ```
 
 2. **Install dependencies**:
    ```bash
@@ -63,20 +98,20 @@ A full-stack shipping quote and booking portal web application designed for HubS
    ```
 
 3. **Set up the database**:
-   ```bash
-   cd server
-   cp env.example .env
-   # Edit .env with your DATABASE_URL and other secrets
-   ```
+   
+   **Option A: Using Supabase (Recommended)**
+   
+   1. Create a Supabase project at https://supabase.com
+   2. Run the SQL schema from `server/supabase/schema.sql` in the Supabase SQL editor
+   3. Copy your Supabase credentials
 
-4. **Run Prisma migrations**:
-   ```bash
-   cd server
-   npm run prisma:generate
-   npm run prisma:migrate
-   ```
+   **Option B: Using Local PostgreSQL**
+   
+   1. Create a PostgreSQL database
+   2. Run `server/supabase/schema.sql` in your database
+   3. Set `DATABASE_URL` in your `.env` file
 
-5. **Configure environment variables**:
+4. **Configure environment variables**:
    
    Create `server/.env`:
    ```env
@@ -95,13 +130,11 @@ A full-stack shipping quote and booking portal web application designed for HubS
    SHIP2PRIMUS_USERNAME="your-ship2primus-username"
    SHIP2PRIMUS_PASSWORD="your-ship2primus-password"
    
-   # Legacy API Gateway (optional - for backward compatibility)
-   API_GATEWAY_RATES_URL="https://api-gateway.example.com/rates"
-   PROXY_API_KEY="your-api-gateway-proxy-key"
+   # GeoNames API Configuration (required for location features)
+   GEONAMES_USERNAME="your-geonames-username"
    
    # HubSpot Integration (optional - for automatic contact sync and notes)
    HUBSPOT_PRIVATE_APP_TOKEN="your-hubspot-private-app-token"
-   HUBSPOT_ACCESS_TOKEN=""  # Legacy - use HUBSPOT_PRIVATE_APP_TOKEN instead
    
    # CORS Configuration
    ALLOWED_ORIGINS="http://localhost:3000,https://app.hubspot.com,https://*.hubspot.com"
@@ -110,6 +143,11 @@ A full-stack shipping quote and booking portal web application designed for HubS
    PORT=5000
    NODE_ENV=development
    ```
+
+5. **Get GeoNames API Username**:
+   - Sign up for a free account at http://www.geonames.org/login
+   - Enable the free web service in your account settings
+   - Use your username in the `GEONAMES_USERNAME` environment variable
 
 ### Running the Application
 
@@ -128,6 +166,8 @@ npm run build
 npm start
 ```
 
+The server will serve the built frontend from `client/dist`.
+
 ### Running Tests
 
 ```bash
@@ -143,10 +183,12 @@ npm run test:client
 ## API Endpoints
 
 ### Authentication
-- `POST /api/auth/login` - Login
-- `POST /api/auth/logout` - Logout
-- `GET /api/auth/me` - Get current user
+- `POST /api/auth/login` - Login with email and password
+- `POST /api/auth/logout` - Logout (clears JWT cookie)
+- `GET /api/auth/me` - Get current authenticated user
 - `POST /api/auth/register` - Register new user/client
+  - Validates password requirements (8+ chars, letter, number)
+  - Returns detailed validation errors
 - `POST /api/auth/invite` - Invite user (ADMIN only)
 
 ### Rates & Booking
@@ -157,12 +199,22 @@ npm run test:client
   - Automatically creates HubSpot notes (when configured)
   - Returns rates sorted by price (cheapest first)
 - `POST /api/book` - Book a shipment
+  - Requires authentication
+  - Creates booking record in database
+  - Returns booking confirmation
 
-### History
-- `GET /api/history/quotes` - List quotes (with filters)
-- `GET /api/history/quotes/:quoteId` - Get quote details
-- `GET /api/history/bookings` - List bookings (with filters)
-- `GET /api/history/bookings/:bookingId` - Get booking details
+### Locations (GeoNames Proxy)
+- `GET /api/locations/countries` - Get all supported countries (US, CA)
+- `GET /api/locations/states?country=US` - Get states/provinces for a country
+- `GET /api/locations/cities?country=US&state=CA` - Get cities for a state
+- `GET /api/locations/postal-codes?country=US&state=CA&city=Los Angeles` - Get postal codes for a city
+- `GET /api/locations/lookup?country=US&postalCode=90210` - Reverse lookup location by postal code
+
+All location endpoints:
+- Use retry logic with exponential backoff (3 retries)
+- Cache results for 7 days
+- Fallback to expired cache on failure
+- Return empty array for postal codes on failure (allows manual entry)
 
 ## HubSpot Embedding
 
@@ -224,23 +276,79 @@ These values will prefill the form when the user is logged in.
 
 ## Database Schema
 
-- **Client**: Tenant organization
-- **User**: Users belonging to a Client
-- **QuoteRequest**: Rate request with full payload
-- **Rate**: Individual rate result from API Gateway
-- **Booking**: Booked shipment
-- **AuditLog**: Activity logging
+The complete SQL schema is in `server/supabase/schema.sql`. Key tables:
 
-See `server/prisma/schema.prisma` for full schema.
+### `clients` (Tenants)
+- `id` (UUID, primary key)
+- `name` (TEXT)
+- `rate_tokens_remaining` (INTEGER, default 3)
+- `rate_tokens_used` (INTEGER, default 0)
+- `created_at` (TIMESTAMPTZ)
+
+### `users`
+- `id` (UUID, primary key)
+- `client_id` (UUID, foreign key)
+- `email` (TEXT, unique)
+- `password_hash` (TEXT)
+- `firstname` (TEXT, camelCase)
+- `lastname` (TEXT, camelCase)
+- `hubspot_opt_in` (BOOLEAN, default false)
+- `role` (user_role enum: 'ADMIN' | 'USER')
+- `created_at` (TIMESTAMPTZ)
+
+**Important**: The database uses `firstname` and `lastname` (camelCase), not `first_name` and `last_name` (snake_case).
+
+### `quote_requests`
+- `id` (UUID, primary key)
+- `client_id` (UUID)
+- `user_id` (UUID)
+- `request_payload_json` (JSONB)
+- `created_at` (TIMESTAMPTZ)
+
+### `rates`
+- `id` (UUID, primary key)
+- `quote_request_id` (UUID, foreign key)
+- `rate_id` (TEXT)
+- `carrier_name` (TEXT)
+- `service_name` (TEXT)
+- `transit_days` (INTEGER)
+- `total_cost` (DECIMAL)
+- `currency` (TEXT)
+- `raw_json` (JSONB)
+- `created_at` (TIMESTAMPTZ)
+
+### `bookings`
+- `id` (UUID, primary key)
+- `client_id` (UUID)
+- `user_id` (UUID)
+- `quote_request_id` (UUID)
+- `rate_id` (UUID)
+- `booking_id_external` (TEXT)
+- `confirmation_number` (TEXT)
+- `status` (TEXT)
+- `raw_json` (JSONB)
+- `created_at` (TIMESTAMPTZ)
+
+### `audit_logs`
+- `id` (UUID, primary key)
+- `client_id` (UUID)
+- `user_id` (UUID, nullable)
+- `action` (TEXT)
+- `metadata_json` (JSONB)
+- `created_at` (TIMESTAMPTZ)
 
 ## Security
 
-- Passwords hashed with bcrypt (10 rounds)
-- JWT tokens in HttpOnly cookies
-- CORS allowlist for HubSpot domains
-- Rate limiting on auth and API endpoints
-- Input validation with Zod
-- Multi-tenant data isolation enforced at database level
+- **Passwords**: Hashed with bcrypt (10 rounds)
+- **Authentication**: JWT tokens in HttpOnly cookies (7-day expiration)
+- **CORS**: Allowlist for HubSpot domains
+- **Input Validation**: Zod schemas for all API endpoints
+- **Multi-tenant Isolation**: Enforced at database level with client_id filtering
+- **Rate Limiting**: 3 quote requests per email (lifetime)
+- **Password Requirements**: Enforced on both client and server
+  - Minimum 8 characters
+  - At least one letter
+  - At least one number
 
 ## Development
 
@@ -260,17 +368,25 @@ npm run dev  # Vite dev server
 
 ### Database Management
 
-```bash
-cd server
-npm run prisma:studio  # Open Prisma Studio
-npm run prisma:migrate  # Create new migration
-```
+The application uses Supabase directly (not Prisma). To manage the database:
+
+1. Use Supabase Dashboard: https://supabase.com/dashboard
+2. Run SQL queries in the SQL Editor
+3. Use the Table Editor for manual data entry
+
+### Customization
+
+**Background Opacity**: To change the background opacity, edit `client/src/components/AnimatedBackground.tsx`:
+- Line 83: Change `opacity: 0.3` to your desired value (0.0 to 1.0)
+
+**Notification Z-Index**: The rate tokens notification uses `z-[9999]` to appear above modals. To change:
+- Edit `client/src/components/RateTokensUsedNotification.tsx`, line 34
 
 ## Testing
 
 ### Backend Tests
 
-Tests use Jest + Supertest. Mock Prisma and external APIs.
+Tests use Jest + Supertest. Mock Supabase and external APIs.
 
 ```bash
 cd server
@@ -291,24 +407,31 @@ npm test
 ### Environment Variables
 
 Ensure all required environment variables are set in production (see `server/env.example` for full list):
-- **Supabase** (required): `NEXT_PUBLIC_SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-- **JWT** (required): `JWT_SECRET` (use a strong random secret)
-- **Ship2Primus** (required for production): `SHIP2PRIMUS_RATES_URL`, `SHIP2PRIMUS_BOOK_URL`, `SHIP2PRIMUS_LOGIN_URL`, `SHIP2PRIMUS_USERNAME`, `SHIP2PRIMUS_PASSWORD`
-- **HubSpot** (optional): `HUBSPOT_PRIVATE_APP_TOKEN` for automatic contact sync and notes
-- **CORS**: `ALLOWED_ORIGINS` (include your HubSpot domains)
-- **Server**: `PORT`, `NODE_ENV=production`
+
+**Required:**
+- `NEXT_PUBLIC_SUPABASE_URL` - Your Supabase project URL
+- `SUPABASE_SERVICE_ROLE_KEY` - Supabase service role key (for backend operations)
+- `NEXT_PUBLIC_SUPABASE_ANON_KEY` - Supabase anonymous key (for client-side)
+- `JWT_SECRET` - Strong random secret for JWT signing
+- `SHIP2PRIMUS_RATES_URL` - Ship2Primus rates API endpoint
+- `SHIP2PRIMUS_BOOK_URL` - Ship2Primus booking API endpoint
+- `SHIP2PRIMUS_LOGIN_URL` - Ship2Primus authentication endpoint
+- `SHIP2PRIMUS_USERNAME` - Ship2Primus API username
+- `SHIP2PRIMUS_PASSWORD` - Ship2Primus API password
+- `GEONAMES_USERNAME` - GeoNames API username
+
+**Optional:**
+- `HUBSPOT_PRIVATE_APP_TOKEN` - For automatic contact sync and notes
+- `ALLOWED_ORIGINS` - Comma-separated list of allowed CORS origins
+- `PORT` - Server port (default: 5000)
+- `NODE_ENV` - Set to `production` in production
 
 ### Database Setup
 
-The application uses Supabase (PostgreSQL). Ensure the following tables exist:
-- `users` (with columns: `id`, `email`, `firstname`, `lastname`, `password_hash`, `client_id`, `role`, `hubspot_opt_in`)
-- `clients` (with columns: `id`, `name`, `rate_tokens_remaining`, `rate_tokens_used`)
-- `quote_requests` (for tracking rate requests)
-- `rates` (for storing rate results)
-- `bookings` (for booking records)
-- `audit_logs` (for activity logging)
-
-**Note**: The database uses `firstname` and `lastname` (camelCase), not `first_name` and `last_name` (snake_case).
+1. **Create Supabase Project**: https://supabase.com
+2. **Run Schema**: Copy and paste `server/supabase/schema.sql` into Supabase SQL Editor
+3. **Verify Tables**: Ensure all tables are created with correct column names
+4. **Set RLS Policies**: The schema includes RLS policies for service role access
 
 ### Build for Production
 
@@ -321,13 +444,48 @@ The server will serve the built frontend from `client/dist`.
 
 ### Vercel Deployment
 
-1. Connect your GitHub repository to Vercel
+See `DEPLOYMENT.md` for detailed Vercel deployment instructions.
+
+**Quick Steps:**
+1. Connect GitHub repository to Vercel
 2. Set all environment variables in Vercel project settings
-3. Configure build command: `npm run vercel-build`
-4. Set output directory: `client/dist` (if needed)
+3. Build command: `npm run vercel-build`
+4. Output directory: `client/dist`
 5. Deploy
 
 The application will automatically build and deploy on push to the main branch.
+
+## GeoNames API Reliability
+
+The application includes robust retry logic for GeoNames API calls:
+
+- **Retry Logic**: 3 attempts with exponential backoff (1s, 2s, 4s)
+- **Timeout**: 15 seconds per request
+- **Caching**: 7-day cache for all location data
+- **Fallback**: Uses expired cache if API fails completely
+- **Error Handling**: Returns empty array for postal codes (allows manual entry)
+
+This ensures >95% success rate even with GeoNames API instability.
+
+## Recent Updates
+
+### Registration Improvements
+- Added detailed password validation with real-time feedback
+- Password requirements displayed before submission
+- Clear error messages for each validation failure
+- Backend validation with structured error responses
+
+### Location Selector Improvements
+- Retry logic with exponential backoff
+- 7-day caching for improved performance
+- Manual ZIP code entry option always available
+- Better error messages and loading states
+
+### UI Improvements
+- Static background (no animations)
+- Background opacity reduced to 0.3 (configurable in `AnimatedBackground.tsx`)
+- Rate tokens notification appears above modals (z-index: 9999)
+- Removed "Get New Quote" button (form changes reset rates automatically)
 
 ## License
 

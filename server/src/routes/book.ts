@@ -46,25 +46,52 @@ async function callShip2PrimusBook(quoteRequest: any, rate: any): Promise<{
 
   try {
     // Construct booking payload according to ShipPrimus API schema
-    // Include original quote request and selected rate information
-    const bookingPayload: any = {
-      quoteRequest: quoteRequest.requestPayloadJson || {},
-      rate: {
-        rateId: rate.rateId,
-        carrierName: rate.carrierName,
-        serviceName: rate.serviceName,
-        totalCost: rate.totalCost,
-        currency: rate.currency || 'USD',
-      },
-    };
+    // The booking endpoint expects the original quote request payload + selected rate ID
+    const originalPayload = quoteRequest.requestPayloadJson || {};
+    
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'book.ts:callShip2PrimusBook:before-payload',message:'Building booking payload',data:{hasOriginalPayload:!!originalPayload,originalPayloadKeys:originalPayload?Object.keys(originalPayload):[],originalPayloadSize:originalPayload?JSON.stringify(originalPayload).length:0,rateId:rate.rateId,carrierName:rate.carrierName},timestamp:Date.now(),runId:'debug-booking',hypothesisId:'H1'})}).catch(()=>{});
+    // #endregion
+
+    // ShipPrimus booking API expects the original request payload with the selected rate ID
+    // Based on API docs, try sending original payload merged with rate ID
+    // If originalPayload is empty/null, we need to construct it from rate data
+    const bookingPayload: any = originalPayload && Object.keys(originalPayload).length > 0
+      ? {
+          ...originalPayload,
+          selectedRateId: rate.rateId,
+        }
+      : {
+          // Fallback: construct minimal payload if original is missing
+          selectedRateId: rate.rateId,
+          rate: {
+            rateId: rate.rateId,
+            carrierName: rate.carrierName,
+            serviceName: rate.serviceName,
+            totalCost: rate.totalCost,
+            currency: rate.currency || 'USD',
+          },
+        };
+
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'book.ts:callShip2PrimusBook:payload-ready',message:'Booking payload ready',data:{payloadKeys:Object.keys(bookingPayload),hasOriginCity:!!bookingPayload.originCity,hasDestinationCity:!!bookingPayload.destinationCity,hasSelectedRateId:!!bookingPayload.selectedRateId,payloadSize:JSON.stringify(bookingPayload).length,usingFallback:!originalPayload||Object.keys(originalPayload).length===0},timestamp:Date.now(),runId:'debug-booking',hypothesisId:'H1'})}).catch(()=>{});
+    // #endregion
 
     // Log the outgoing payload for debugging (server-side only)
     console.log('[BOOK] Booking payload:', JSON.stringify(bookingPayload, null, 2));
+
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'book.ts:callShip2PrimusBook:before-api-call',message:'About to call ShipPrimus booking API',data:{apiUrl,hasPayload:!!bookingPayload,payloadKeys:Object.keys(bookingPayload)},timestamp:Date.now(),runId:'debug-booking',hypothesisId:'H2'})}).catch(()=>{});
+    // #endregion
 
     const data = await ship2PrimusRequest<any>(apiUrl, {
       method: 'POST',
       body: JSON.stringify(bookingPayload),
     });
+
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'book.ts:callShip2PrimusBook:after-api-call',message:'ShipPrimus booking API response',data:{hasData:!!data,dataKeys:data?Object.keys(data):[],hasBookingId:!!(data?.bookingId||data?.booking_id||data?.id)},timestamp:Date.now(),runId:'debug-booking',hypothesisId:'H2'})}).catch(()=>{});
+    // #endregion
 
     return {
       bookingId: data.bookingId || data.booking_id || data.id,
@@ -170,7 +197,7 @@ router.post('/book', authenticateToken, validateBody(bookingRequestSchema), asyn
   try {
     const userId = req.user!.userId;
     const clientId = req.user!.clientId;
-    const { quoteId, selectedRateId, rate } = req.body;
+    const { quoteId, selectedRateId, rate, originalRequestPayload: providedRequestPayload } = req.body;
 
     let rateData: any;
     let originalRequestPayload: any = null;
@@ -226,6 +253,8 @@ router.post('/book', authenticateToken, validateBody(bookingRequestSchema), asyn
     } else if (rate) {
       // POC flow: use rate data directly
       rateData = rate;
+      // Use provided original request payload if available, otherwise null
+      originalRequestPayload = providedRequestPayload || null;
     } else {
       return res.status(400).json({
         requestId,

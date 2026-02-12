@@ -136,7 +136,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         // #endregion
         throw new Error(`Registration failed with status ${response.status}: ${responseText || 'No response body'}`);
       }
-      throw new Error(error.message || 'Registration failed');
+      // Preserve structured error information for better error handling
+      const errorMessage = error.errorCode === 'VALIDATION_ERROR' && error.errors
+        ? `VALIDATION_ERROR: ${JSON.stringify(error)}`
+        : error.message || 'Registration failed';
+      const err = new Error(errorMessage);
+      (err as any).errorData = error;
+      throw err;
     }
 
     let data;

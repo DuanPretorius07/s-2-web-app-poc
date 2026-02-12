@@ -1,16 +1,23 @@
-import { useState, type FormEvent } from 'react';
+import { useState, type FormEvent, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import ContactS2Message from './ContactS2Message';
+import LocationSelector from './LocationSelector';
+import RatesModal from './RatesModal';
+import BookingConfirmation from './BookingConfirmation';
+import RateTokensUsedNotification from './RateTokensUsedNotification';
+
+interface LocationValue {
+  country: string;
+  countryName: string;
+  state: string;
+  stateName: string;
+  city: string;
+  zipCode: string;
+}
 
 interface QuoteFormData {
-  originCountry: string;
-  originCity: string;
-  originState: string;
-  originZipcode: string;
-  destinationCountry: string;
-  destinationCity: string;
-  destinationState: string;
-  destinationZipcode: string;
+  origin: LocationValue;
+  destination: LocationValue;
   pickupDate: string;
   freightType: string;
   packagingType: string;
@@ -25,18 +32,17 @@ interface QuoteFormData {
 }
 
 interface RateResult {
-  carrier: string;
-  service: string;
-  price: number;
-  transit_days: number;
-  eta?: string;
+  id: string;
+  rateId?: string;
+  name?: string;
+  carrierName: string;
+  serviceName: string;
+  transitDays?: number;
+  totalCost: number;
+  currency: string;
+  iconUrl?: string;
+  booked?: boolean;
 }
-
-const COUNTRIES = [
-  { code: 'US', name: 'United States' },
-  { code: 'CA', name: 'Canada' },
-  { code: 'MX', name: 'Mexico' },
-];
 
 // Match backend API expectations
 const FREIGHT_TYPES = [
@@ -55,16 +61,24 @@ const PACKAGING_TYPES = [
 ];
 
 export default function QuoteForm() {
-  const { user } = useAuth();
+  const { user, updateRateTokens } = useAuth();
   const [formData, setFormData] = useState<QuoteFormData>({
-    originCountry: 'US',
-    originCity: '',
-    originState: '',
-    originZipcode: '',
-    destinationCountry: 'US',
-    destinationCity: '',
-    destinationState: '',
-    destinationZipcode: '',
+    origin: {
+      country: 'US',
+      countryName: 'United States',
+      state: '',
+      stateName: '',
+      city: '',
+      zipCode: '',
+    },
+    destination: {
+      country: 'US',
+      countryName: 'United States',
+      state: '',
+      stateName: '',
+      city: '',
+      zipCode: '',
+    },
     pickupDate: '',
     freightType: '',
     packagingType: 'PLT',
@@ -86,6 +100,57 @@ export default function QuoteForm() {
     'rate_limit' | 'hazmat' | 'error' | 'no_rates' | null
   >(null);
   const [generalMessage, setGeneralMessage] = useState<string | undefined>(undefined);
+  const [bookingState, setBookingState] = useState<{
+    status: 'idle' | 'booking' | 'success' | 'error';
+    bookingId?: string;
+    confirmationNumber?: string;
+    error?: string;
+  }>({ status: 'idle' });
+  const [originalRequestPayload, setOriginalRequestPayload] = useState<any>(null);
+  const [showRatesModal, setShowRatesModal] = useState(false);
+  const [formHasChanged, setFormHasChanged] = useState(false);
+  const [showTokensNotification, setShowTokensNotification] = useState(false);
+  const [tokensNotificationData, setTokensNotificationData] = useState<{
+    remaining: number | null;
+    used: number | null;
+  } | null>(null);
+
+  // Track form changes to reset button state
+  useEffect(() => {
+    // When form changes, mark as changed (this will reset button to "Get Rates")
+    if (rates.length > 0) {
+      setFormHasChanged(true);
+    }
+  }, [
+    formData.origin.country,
+    formData.origin.state,
+    formData.origin.city,
+    formData.origin.zipCode,
+    formData.destination.country,
+    formData.destination.state,
+    formData.destination.city,
+    formData.destination.zipCode,
+    formData.pickupDate,
+    formData.freightType,
+    formData.packagingType,
+    formData.quantity,
+    formData.length,
+    formData.width,
+    formData.height,
+    formData.weight,
+    formData.stackable,
+    formData.hazmat,
+  ]);
+
+  // Reset rates when form changes
+  useEffect(() => {
+    if (formHasChanged && rates.length > 0) {
+      setRates([]);
+      setShowRatesModal(false);
+      setBookingState({ status: 'idle' });
+      setFormHasChanged(false); // Reset flag after clearing rates
+    }
+  }, [formHasChanged]);
 
   const handleChange = (field: keyof QuoteFormData, value: any) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
@@ -110,12 +175,14 @@ export default function QuoteForm() {
   const validateForm = (): boolean => {
     const newErrors: Record<string, string> = {};
 
-    if (!formData.originCity.trim()) newErrors.originCity = 'Origin city is required';
-    if (!formData.originState.trim()) newErrors.originState = 'Origin state is required';
-    if (!formData.originZipcode.trim()) newErrors.originZipcode = 'Origin ZIP code is required';
-    if (!formData.destinationCity.trim()) newErrors.destinationCity = 'Destination city is required';
-    if (!formData.destinationState.trim()) newErrors.destinationState = 'Destination state is required';
-    if (!formData.destinationZipcode.trim()) newErrors.destinationZipcode = 'Destination ZIP code is required';
+    if (!formData.origin.country) newErrors['origin.country'] = 'Origin country is required';
+    if (!formData.origin.state) newErrors['origin.state'] = 'Origin state is required';
+    if (!formData.origin.city.trim()) newErrors['origin.city'] = 'Origin city is required';
+    if (!formData.origin.zipCode.trim()) newErrors['origin.zipCode'] = 'Origin ZIP code is required';
+    if (!formData.destination.country) newErrors['destination.country'] = 'Destination country is required';
+    if (!formData.destination.state) newErrors['destination.state'] = 'Destination state is required';
+    if (!formData.destination.city.trim()) newErrors['destination.city'] = 'Destination city is required';
+    if (!formData.destination.zipCode.trim()) newErrors['destination.zipCode'] = 'Destination ZIP code is required';
     if (!formData.pickupDate) newErrors.pickupDate = 'Pickup date is required';
 
     // Date must be today or future
@@ -185,14 +252,14 @@ export default function QuoteForm() {
       // Build payload matching backend API schema exactly
       const rateTypes = normalizeFreightType(formData.freightType);
       const payload = {
-        originCity: formData.originCity.trim(),
-        originState: formData.originState.trim(),
-        originZipcode: formData.originZipcode.trim(),
-        originCountry: formData.originCountry || 'US',
-        destinationCity: formData.destinationCity.trim(),
-        destinationState: formData.destinationState.trim(),
-        destinationZipcode: formData.destinationZipcode.trim(),
-        destinationCountry: formData.destinationCountry || 'US',
+        originCity: formData.origin.city.trim(),
+        originState: formData.origin.state.trim(),
+        originZipcode: formData.origin.zipCode.trim(),
+        originCountry: formData.origin.country || 'US',
+        destinationCity: formData.destination.city.trim(),
+        destinationState: formData.destination.state.trim(),
+        destinationZipcode: formData.destination.zipCode.trim(),
+        destinationCountry: formData.destination.country || 'US',
         UOM: 'US',
         pickupDate: formData.pickupDate,
         freightInfo: [{
@@ -277,23 +344,32 @@ export default function QuoteForm() {
       // Transform backend rates to display format
       const receivedRates: RateResult[] = Array.isArray(data.rates)
         ? data.rates.map((rate: any) => ({
-            carrier: rate.name || rate.carrierName || 'Unknown',
-            service: rate.serviceName || rate.serviceLevel || 'Standard',
-            price: rate.total || rate.totalCost || 0,
-            transit_days: rate.transitDays || null,
-            eta: rate.eta,
+            id: rate.id || rate.rateId || crypto.randomUUID(),
+            rateId: rate.rateId || rate.id,
+            name: rate.name || rate.carrierName || 'Unknown',
+            carrierName: rate.name || rate.carrierName || 'Unknown',
+            serviceName: rate.serviceName || rate.serviceLevel || 'Standard',
+            transitDays: rate.transitDays || null,
+            totalCost: rate.total || rate.totalCost || 0,
+            currency: rate.currency || 'USD',
+            iconUrl: rate.iconUrl || rate.icon_url || rate.logoUrl || rate.logo_url,
+            booked: false,
           }))
         : [];
 
       console.log('[QuoteForm] SUCCESS - Rates received:', {
         count: receivedRates.length,
         rates: receivedRates.map(r => ({
-          carrier: r.carrier,
-          service: r.service,
-          price: r.price,
-          transit_days: r.transit_days,
+          id: r.id,
+          carrier: r.carrierName,
+          service: r.serviceName,
+          price: r.totalCost,
+          transit_days: r.transitDays,
         })),
       });
+
+      // Store original request payload for booking
+      setOriginalRequestPayload(payload);
 
       if (!receivedRates.length) {
         console.warn('[QuoteForm] No rates in response');
@@ -305,6 +381,20 @@ export default function QuoteForm() {
       }
 
       setRates(receivedRates);
+      setBookingState({ status: 'idle' }); // Reset booking state on new rates
+      setShowRatesModal(true); // Show rates in modal
+      setFormHasChanged(false); // Reset form changed flag after successful rates
+
+      // Update rate tokens in auth context
+      if (data.rateTokensRemaining !== undefined || data.rateTokensUsed !== undefined) {
+        updateRateTokens(data.rateTokensRemaining, data.rateTokensUsed);
+        // Show notification about remaining tokens
+        setTokensNotificationData({
+          remaining: data.rateTokensRemaining ?? null,
+          used: data.rateTokensUsed ?? null,
+        });
+        setShowTokensNotification(true);
+      }
     } catch (error) {
       console.error('[QuoteForm] Exception during rate request:', {
         error,
@@ -315,6 +405,123 @@ export default function QuoteForm() {
       setGeneralMessage('An error occurred. Please try again or contact support.');
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const handleBook = async (rateId: string) => {
+    // Find the selected rate
+    const selectedRate = rates.find(r => r.id === rateId);
+    if (!selectedRate) {
+      console.error('[QuoteForm] Rate not found for booking:', rateId);
+      setBookingState({ status: 'error', error: 'Selected rate not found' });
+      return;
+    }
+
+    // Prevent duplicate submissions
+    if (bookingState.status === 'booking') {
+      console.warn('[QuoteForm] Booking already in progress');
+      return;
+    }
+
+    setBookingState({ status: 'booking' });
+
+    try {
+      // Reconstruct the original request payload for booking
+      const stackableYes = formData.stackable === 'Yes';
+      const isStackable = stackableYes;
+      const stackAmount = isStackable ? (parseInt(formData.stacks, 10) || 0) : 0;
+      
+      const normalizeFreightType = (raw: string): string[] => {
+        const v = (raw || '').toString().trim().toUpperCase();
+        const DEFAULT_ALL = ['LTL', 'GUARANTEED', 'SP', 'VOL'];
+        const SUPPORTED = ['LTL', 'GUARANTEED', 'SP', 'VOL', 'AIR'];
+        
+        if (!v || v === 'ALL' || v === 'PLEASE SELECT') {
+          return DEFAULT_ALL;
+        } else if (SUPPORTED.includes(v)) {
+          return [v];
+        } else {
+          return DEFAULT_ALL;
+        }
+      };
+
+      const rateTypes = normalizeFreightType(formData.freightType);
+      const requestPayload = {
+        originCity: formData.origin.city.trim(),
+        originState: formData.origin.state.trim(),
+        originZipcode: formData.origin.zipCode.trim(),
+        originCountry: formData.origin.country || 'US',
+        destinationCity: formData.destination.city.trim(),
+        destinationState: formData.destination.state.trim(),
+        destinationZipcode: formData.destination.zipCode.trim(),
+        destinationCountry: formData.destination.country || 'US',
+        UOM: 'US',
+        pickupDate: formData.pickupDate,
+        freightInfo: [{
+          qty: formData.quantity,
+          dimType: formData.packagingType || 'PLT',
+          weight: parseFloat(formData.weight) || 0,
+          weightType: 'each',
+          length: parseFloat(formData.length) || 0,
+          width: parseFloat(formData.width) || 0,
+          height: parseFloat(formData.height) || 0,
+          volume: 0,
+          hazmat: formData.hazmat === 'Yes',
+          class: 0,
+          stack: isStackable,
+          stackAmount: isStackable ? stackAmount : 1,
+        }],
+        rateTypesList: rateTypes,
+      };
+
+      const response = await fetch('/api/book', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include',
+        body: JSON.stringify({
+          rate: {
+            rateId: selectedRate.rateId || selectedRate.id,
+            carrierName: selectedRate.carrierName,
+            serviceName: selectedRate.serviceName,
+            totalCost: selectedRate.totalCost,
+            currency: selectedRate.currency,
+          },
+          // Include original request payload for ShipPrimus API
+          originalRequestPayload: requestPayload,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.message || 'Failed to book shipment');
+      }
+
+      // Mark rate as booked
+      setRates(prevRates =>
+        prevRates.map(rate =>
+          rate.id === rateId ? { ...rate, booked: true } : rate
+        )
+      );
+
+      setBookingState({
+        status: 'success',
+        bookingId: data.bookingId,
+        confirmationNumber: data.confirmationNumber,
+      });
+
+      console.log('[QuoteForm] Booking successful:', {
+        bookingId: data.bookingId,
+        confirmationNumber: data.confirmationNumber,
+      });
+    } catch (error) {
+      console.error('[QuoteForm] Booking error:', error);
+      setBookingState({
+        status: 'error',
+        error: error instanceof Error ? error.message : 'Failed to book shipment',
+      });
     }
   };
 
@@ -374,158 +581,34 @@ export default function QuoteForm() {
 
       <form onSubmit={handleSubmit} className="space-y-6">
         {/* Origin/Destination Section */}
-        <div className="bg-gray-50 rounded-lg border border-gray-200 p-6">
-          <h2 className="text-lg sm:text-xl font-semibold mb-4 text-gray-900">
-            Origin &amp; Destination
-          </h2>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {/* Origin Fields */}
-            <div>
-              <label className="block text-sm font-medium mb-1 text-gray-700">
-                Origin Country
-              </label>
-              <select
-                value={formData.originCountry}
-                onChange={(e) => handleChange('originCountry', e.target.value)}
-                className="w-full border rounded px-3 py-2 text-sm shadow-sm focus:ring-s2-red focus:border-s2-red"
-              >
-                {COUNTRIES.map((country) => (
-                  <option key={country.code} value={country.code}>
-                    {country.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium mb-1 text-gray-700">
-                Origin City *
-              </label>
-              <input
-                type="text"
-                value={formData.originCity}
-                onChange={(e) => handleChange('originCity', e.target.value)}
-                className={`w-full border rounded px-3 py-2 text-sm shadow-sm focus:ring-s2-red focus:border-s2-red ${
-                  errors.originCity ? 'border-red-500' : 'border-gray-300'
-                }`}
-                placeholder="e.g., Seattle"
-              />
-              {errors.originCity && (
-                <p className="text-red-500 text-xs mt-1">{errors.originCity}</p>
-              )}
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium mb-1 text-gray-700">
-                Origin State *
-              </label>
-              <input
-                type="text"
-                value={formData.originState}
-                onChange={(e) => handleChange('originState', e.target.value)}
-                className={`w-full border rounded px-3 py-2 text-sm shadow-sm focus:ring-s2-red focus:border-s2-red ${
-                  errors.originState ? 'border-red-500' : 'border-gray-300'
-                }`}
-                placeholder="e.g., WA"
-                maxLength={2}
-              />
-              {errors.originState && (
-                <p className="text-red-500 text-xs mt-1">{errors.originState}</p>
-              )}
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium mb-1 text-gray-700">
-                Origin ZIP Code *
-              </label>
-              <input
-                type="text"
-                value={formData.originZipcode}
-                onChange={(e) => handleChange('originZipcode', e.target.value)}
-                className={`w-full border rounded px-3 py-2 text-sm shadow-sm focus:ring-s2-red focus:border-s2-red ${
-                  errors.originZipcode ? 'border-red-500' : 'border-gray-300'
-                }`}
-                placeholder="e.g., 98122"
-              />
-              {errors.originZipcode && (
-                <p className="text-red-500 text-xs mt-1">{errors.originZipcode}</p>
-              )}
-            </div>
-
-            {/* Destination Fields */}
-            <div>
-              <label className="block text-sm font-medium mb-1 text-gray-700">
-                Destination Country
-              </label>
-              <select
-                value={formData.destinationCountry}
-                onChange={(e) => handleChange('destinationCountry', e.target.value)}
-                className="w-full border rounded px-3 py-2 text-sm shadow-sm focus:ring-s2-red focus:border-s2-red"
-              >
-                {COUNTRIES.map((country) => (
-                  <option key={country.code} value={country.code}>
-                    {country.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium mb-1 text-gray-700">
-                Destination City *
-              </label>
-              <input
-                type="text"
-                value={formData.destinationCity}
-                onChange={(e) => handleChange('destinationCity', e.target.value)}
-                className={`w-full border rounded px-3 py-2 text-sm shadow-sm focus:ring-s2-red focus:border-s2-red ${
-                  errors.destinationCity ? 'border-red-500' : 'border-gray-300'
-                }`}
-                placeholder="e.g., Boston"
-              />
-              {errors.destinationCity && (
-                <p className="text-red-500 text-xs mt-1">{errors.destinationCity}</p>
-              )}
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium mb-1 text-gray-700">
-                Destination State *
-              </label>
-              <input
-                type="text"
-                value={formData.destinationState}
-                onChange={(e) => handleChange('destinationState', e.target.value)}
-                className={`w-full border rounded px-3 py-2 text-sm shadow-sm focus:ring-s2-red focus:border-s2-red ${
-                  errors.destinationState ? 'border-red-500' : 'border-gray-300'
-                }`}
-                placeholder="e.g., MA"
-                maxLength={2}
-              />
-              {errors.destinationState && (
-                <p className="text-red-500 text-xs mt-1">{errors.destinationState}</p>
-              )}
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium mb-1 text-gray-700">
-                Destination ZIP Code *
-              </label>
-              <input
-                type="text"
-                value={formData.destinationZipcode}
-                onChange={(e) => handleChange('destinationZipcode', e.target.value)}
-                className={`w-full border rounded px-3 py-2 text-sm shadow-sm focus:ring-s2-red focus:border-s2-red ${
-                  errors.destinationZipcode ? 'border-red-500' : 'border-gray-300'
-                }`}
-                placeholder="e.g., 02139"
-              />
-              {errors.destinationZipcode && (
-                <p className="text-red-500 text-xs mt-1">{errors.destinationZipcode}</p>
-              )}
-            </div>
-          </div>
+        <div className="bg-gray-50 rounded-lg border border-gray-200 p-6 space-y-6">
+          <LocationSelector
+            label="Origin"
+            value={formData.origin}
+            onChange={(location) =>
+              setFormData((prev) => ({ ...prev, origin: location }))
+            }
+            errors={{
+              country: errors['origin.country'],
+              state: errors['origin.state'],
+              city: errors['origin.city'],
+              zipCode: errors['origin.zipCode'],
+            }}
+          />
+          
+          <LocationSelector
+            label="Destination"
+            value={formData.destination}
+            onChange={(location) =>
+              setFormData((prev) => ({ ...prev, destination: location }))
+            }
+            errors={{
+              country: errors['destination.country'],
+              state: errors['destination.state'],
+              city: errors['destination.city'],
+              zipCode: errors['destination.zipCode'],
+            }}
+          />
         </div>
 
         {/* Shipment Details Section */}
@@ -749,63 +832,87 @@ export default function QuoteForm() {
           </div>
         </div>
 
-        {/* Submit Button */}
-        <button
-          type="submit"
-          disabled={isSubmitting || formData.hazmat === 'Yes'}
-          className={`w-full py-3 px-6 rounded-lg font-semibold text-sm sm:text-base shadow-md hover:shadow-lg transition-colors ${
-            isSubmitting || formData.hazmat === 'Yes'
-              ? 'bg-gray-400 cursor-not-allowed text-white'
-              : 'bg-s2-red hover:bg-s2-red-dark text-white'
-          }`}
-        >
-          {isSubmitting ? 'Getting Rates...' : 'Get Rates'}
-        </button>
+        {/* Submit Button - only show if rates haven't been fetched yet */}
+        {rates.length === 0 && (
+          <button
+            type="submit"
+            disabled={isSubmitting || formData.hazmat === 'Yes'}
+            className={`w-full py-3 px-6 rounded-lg font-semibold text-sm sm:text-base shadow-md hover:shadow-lg transition-colors ${
+              isSubmitting || formData.hazmat === 'Yes'
+                ? 'bg-gray-400 cursor-not-allowed text-white'
+                : 'bg-s2-red hover:bg-s2-red-dark text-white'
+            }`}
+          >
+            {isSubmitting ? 'Getting Rates...' : 'Get Rates'}
+          </button>
+        )}
       </form>
 
-      {/* Rates Display */}
+      {/* View Rates Button (shown when rates exist) */}
       {rates.length > 0 && (
-        <div className="mt-8">
-          <h2 className="text-xl font-semibold text-s2-red mb-4">Available Rates</h2>
-          <div className="overflow-x-auto shadow-md rounded-lg border border-gray-200">
-            <table className="w-full divide-y divide-gray-200">
-              <thead className="bg-s2-red">
-                <tr>
-                  <th className="px-3 py-3 text-left text-xs font-semibold text-white uppercase tracking-wider">
-                    Carrier
-                  </th>
-                  <th className="px-3 py-3 text-left text-xs font-semibold text-white uppercase tracking-wider">
-                    Service
-                  </th>
-                  <th className="px-3 py-3 text-left text-xs font-semibold text-white uppercase tracking-wider">
-                    Transit
-                  </th>
-                  <th className="px-3 py-3 text-left text-xs font-semibold text-white uppercase tracking-wider">
-                    Price
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
-                {rates.map((rate, idx) => (
-                  <tr key={`${rate.carrier}-${rate.service}-${idx}`} className="hover:bg-s2-red-lighter transition-colors">
-                    <td className="px-3 py-3 text-sm font-semibold text-gray-900">
-                      {rate.carrier}
-                    </td>
-                    <td className="px-3 py-3 text-sm text-gray-700">{rate.service}</td>
-                    <td className="px-3 py-3 text-sm text-gray-700">
-                      {rate.transit_days
-                        ? `${rate.transit_days} day${rate.transit_days === 1 ? '' : 's'}`
-                        : '—'}
-                    </td>
-                    <td className="px-3 py-3 text-sm font-bold text-s2-red">
-                      ${rate.price.toFixed(2)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+        <div className="mt-4">
+          <div className="bg-green-50 border border-green-200 rounded p-4 mb-4">
+            <p className="text-green-800 font-semibold">
+              ✓ Found {rates.length} rate{rates.length !== 1 ? 's' : ''}
+            </p>
+          </div>
+          <button
+            onClick={() => setShowRatesModal(true)}
+            className="w-full py-3 px-6 rounded-lg font-semibold text-sm sm:text-base shadow-md hover:shadow-lg transition-colors bg-blue-600 hover:bg-blue-700 text-white"
+          >
+            📋 View Available Rates & Book
+          </button>
+        </div>
+      )}
+
+      {/* Rates Modal */}
+      {showRatesModal && rates.length > 0 && (
+        <RatesModal
+          rates={rates}
+          onBook={handleBook}
+          onClose={() => setShowRatesModal(false)}
+          loading={bookingState.status === 'booking'}
+        />
+      )}
+
+      {/* Booking Confirmation Modal */}
+      {bookingState.status === 'success' && (
+        <BookingConfirmation
+          bookingId={bookingState.bookingId}
+          confirmationNumber={bookingState.confirmationNumber}
+          onClose={() => setBookingState({ status: 'idle' })}
+        />
+      )}
+
+      {/* Booking Error Message */}
+      {bookingState.status === 'error' && (
+        <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-lg">
+          <div className="flex items-center">
+            <span className="text-red-600 mr-2">⚠️</span>
+            <div>
+              <p className="text-red-800 font-semibold">Booking Failed</p>
+              <p className="text-red-600 text-sm">{bookingState.error}</p>
+            </div>
+            <button
+              onClick={() => setBookingState({ status: 'idle' })}
+              className="ml-auto text-red-600 hover:text-red-800"
+            >
+              ✕
+            </button>
           </div>
         </div>
+      )}
+
+      {/* Rate Tokens Used Notification */}
+      {showTokensNotification && tokensNotificationData && (
+        <RateTokensUsedNotification
+          tokensRemaining={tokensNotificationData.remaining}
+          tokensUsed={tokensNotificationData.used}
+          onClose={() => {
+            setShowTokensNotification(false);
+            setTokensNotificationData(null);
+          }}
+        />
       )}
     </div>
   );
