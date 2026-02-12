@@ -8,7 +8,11 @@
       "destination": "/api/serverless"
     },
     {
-      "source": "/((?!api/).*)",
+      "source": "/restricted",
+      "destination": "/api/serverless"
+    },
+    {
+      "source": "/((?!api/|restricted).*)",
       "destination": "/index.html"
     }
   ],
