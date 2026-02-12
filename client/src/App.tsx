@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import Login from './pages/Login';
@@ -14,6 +15,12 @@ import RateTokensNotification from './components/RateTokensNotification';
 
 function AppRoutes() {
   const { user, loading } = useAuth();
+
+  // #region agent log
+  useEffect(() => {
+    fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.tsx:AppRoutes:render',message:'AppRoutes rendering',data:{loading,hasUser:!!user,userEmail:user?.email,pathname:window.location.pathname},timestamp:Date.now(),runId:'debug-blank-screen',hypothesisId:'H2'})}).catch(()=>{});
+  }, [loading, user]);
+  // #endregion
 
   if (loading) {
     return (
@@ -68,6 +75,12 @@ function AppRoutes() {
 }
 
 function App() {
+  // #region agent log
+  useEffect(() => {
+    fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.tsx:App:mount',message:'App component mounted',data:{pathname:window.location.pathname,userAgent:navigator.userAgent.substring(0,100)},timestamp:Date.now(),runId:'debug-blank-screen',hypothesisId:'H3'})}).catch(()=>{});
+  }, []);
+  // #endregion
+
   return (
     <BrowserRouter>
       <AuthProvider>

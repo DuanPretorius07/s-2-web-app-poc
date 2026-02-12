@@ -43,16 +43,35 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   async function checkAuth() {
     try {
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'AuthContext.tsx:checkAuth:start',message:'Starting auth check',data:{timestamp:Date.now()},timestamp:Date.now(),runId:'debug-blank-screen',hypothesisId:'H1'})}).catch(()=>{});
+      // #endregion
       const response = await fetch('/api/auth/me', {
         credentials: 'include',
       });
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'AuthContext.tsx:checkAuth:response',message:'Auth check response received',data:{status:response.status,ok:response.ok,statusText:response.statusText},timestamp:Date.now(),runId:'debug-blank-screen',hypothesisId:'H1'})}).catch(()=>{});
+      // #endregion
       if (response.ok) {
         const data = await response.json();
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'AuthContext.tsx:checkAuth:success',message:'Auth check successful',data:{hasUser:!!data.user,userEmail:data.user?.email},timestamp:Date.now(),runId:'debug-blank-screen',hypothesisId:'H1'})}).catch(()=>{});
+        // #endregion
         setUser(data.user);
+      } else {
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'AuthContext.tsx:checkAuth:notOk',message:'Auth check failed - not authenticated',data:{status:response.status,statusText:response.statusText},timestamp:Date.now(),runId:'debug-blank-screen',hypothesisId:'H1'})}).catch(()=>{});
+        // #endregion
       }
-    } catch (error) {
+    } catch (error: any) {
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'AuthContext.tsx:checkAuth:error',message:'Auth check exception',data:{errorName:error?.name,errorMessage:error?.message,errorStack:error?.stack?.substring(0,500)},timestamp:Date.now(),runId:'debug-blank-screen',hypothesisId:'H1'})}).catch(()=>{});
+      // #endregion
       console.error('Auth check failed:', error);
     } finally {
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'AuthContext.tsx:checkAuth:finally',message:'Auth check complete - setting loading to false',data:{timestamp:Date.now()},timestamp:Date.now(),runId:'debug-blank-screen',hypothesisId:'H1'})}).catch(()=>{});
+      // #endregion
       setLoading(false);
     }
   }
