@@ -22,21 +22,25 @@ const bookingRequestSchema = z.object({
   message: "Either (quoteId and selectedRateId) or rate must be provided",
 });
 
-async function callShip2PrimusBook(quoteRequest: any, rate: any): Promise<{
-  bookingId?: string;
+/**
+ * Request to book (save quote/rate) - This saves the quote and notifies S2 team
+ * Note: This does NOT create a booking, it only saves the quote for S2 processing
+ */
+async function callShip2PrimusSave(quoteRequest: any, rate: any): Promise<{
+  savedQuoteId?: string;
   confirmationNumber?: string;
   status: string;
   details?: any;
 }> {
-  const apiUrl = process.env.SHIP2PRIMUS_BOOK_URL;
+  const apiUrl = process.env.SHIP2PRIMUS_SAVE_URL || process.env.SHIP2PRIMUS_BOOK_URL;
 
   if (!apiUrl) {
     // Mock response for development
-    console.warn('SHIP2PRIMUS_BOOK_URL not configured, returning mock data');
+    console.warn('SHIP2PRIMUS_SAVE_URL not configured, returning mock data');
     return {
-      bookingId: `mock-booking-${Date.now()}`,
-      confirmationNumber: `CONF-${Math.random().toString(36).substring(2, 11).toUpperCase()}`,
-      status: 'confirmed',
+      savedQuoteId: `mock-saved-${Date.now()}`,
+      confirmationNumber: `SAVED-${Math.random().toString(36).substring(2, 11).toUpperCase()}`,
+      status: 'saved',
       details: {
         carrier: rate.carrierName,
         service: rate.serviceName,
@@ -45,18 +49,12 @@ async function callShip2PrimusBook(quoteRequest: any, rate: any): Promise<{
   }
 
   try {
-    // Construct booking payload according to ShipPrimus API schema
-    // The booking endpoint expects the original quote request payload + selected rate ID
+    // Construct save payload - includes original quote request + selected rate
+    // The save endpoint saves the quote/rate and notifies S2 team
     const originalPayload = quoteRequest.requestPayloadJson || {};
     
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'book.ts:callShip2PrimusBook:before-payload',message:'Building booking payload',data:{hasOriginalPayload:!!originalPayload,originalPayloadKeys:originalPayload?Object.keys(originalPayload):[],originalPayloadSize:originalPayload?JSON.stringify(originalPayload).length:0,rateId:rate.rateId,carrierName:rate.carrierName},timestamp:Date.now(),runId:'debug-booking',hypothesisId:'H1'})}).catch(()=>{});
-    // #endregion
-
-    // ShipPrimus booking API expects the original request payload with the selected rate ID
-    // Based on API docs, try sending original payload merged with rate ID
-    // If originalPayload is empty/null, we need to construct it from rate data
-    const bookingPayload: any = originalPayload && Object.keys(originalPayload).length > 0
+    // Save endpoint expects original request payload with selected rate ID
+    const savePayload: any = originalPayload && Object.keys(originalPayload).length > 0
       ? {
           ...originalPayload,
           selectedRateId: rate.rateId,
@@ -73,46 +71,38 @@ async function callShip2PrimusBook(quoteRequest: any, rate: any): Promise<{
           },
         };
 
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'book.ts:callShip2PrimusBook:payload-ready',message:'Booking payload ready',data:{payloadKeys:Object.keys(bookingPayload),hasOriginCity:!!bookingPayload.originCity,hasDestinationCity:!!bookingPayload.destinationCity,hasSelectedRateId:!!bookingPayload.selectedRateId,payloadSize:JSON.stringify(bookingPayload).length,usingFallback:!originalPayload||Object.keys(originalPayload).length===0},timestamp:Date.now(),runId:'debug-booking',hypothesisId:'H1'})}).catch(()=>{});
-    // #endregion
-
-    // Log the outgoing payload for debugging (server-side only)
-    console.log('[BOOK] Booking payload:', JSON.stringify(bookingPayload, null, 2));
-
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'book.ts:callShip2PrimusBook:before-api-call',message:'About to call ShipPrimus booking API',data:{apiUrl,hasPayload:!!bookingPayload,payloadKeys:Object.keys(bookingPayload)},timestamp:Date.now(),runId:'debug-booking',hypothesisId:'H2'})}).catch(()=>{});
-    // #endregion
+    console.log('[SAVE] Request to book payload:', JSON.stringify(savePayload, null, 2));
 
     const data = await ship2PrimusRequest<any>(apiUrl, {
       method: 'POST',
-      body: JSON.stringify(bookingPayload),
+      body: JSON.stringify(savePayload),
     });
 
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'book.ts:callShip2PrimusBook:after-api-call',message:'ShipPrimus booking API response',data:{hasData:!!data,dataKeys:data?Object.keys(data):[],hasBookingId:!!(data?.bookingId||data?.booking_id||data?.id)},timestamp:Date.now(),runId:'debug-booking',hypothesisId:'H2'})}).catch(()=>{});
-    // #endregion
-
     return {
-      bookingId: data.bookingId || data.booking_id || data.id,
+      savedQuoteId: data.id || data.savedQuoteId || data.quoteId,
       confirmationNumber: data.confirmationNumber || data.confirmation_number || data.confirmation,
-      status: data.status || 'confirmed',
+      status: data.status || 'saved',
       details: data,
     };
   } catch (error) {
-    console.error('Ship2Primus booking API error:', error);
+    console.error('Ship2Primus save API error:', error);
     throw error;
   }
 }
 
-async function createHubSpotBookingNote(
+/**
+ * Create HubSpot note for request to book (saves quote/rate)
+ * Note: This is called when user requests to book, not when booking is confirmed
+ */
+async function createHubSpotRequestToBookNote(
   contactEmail: string,
   rate: any,
-  booking: any,
+  saveResult: any,
   dealId?: string
 ) {
-  const accessToken = process.env.HUBSPOT_ACCESS_TOKEN;
+  const accessToken = process.env.HUBSPOT_PRIVATE_APP_TOKEN || process.env.HUBSPOT_ACCESS_TOKEN;
   if (!accessToken) {
+    console.log('[HubSpot] Skipping request to book note - no token configured');
     return;
   }
 
@@ -147,11 +137,11 @@ async function createHubSpotBookingNote(
     }
 
     const contactId = searchData.results[0].id;
-    const noteBody = `Shipping Booking Confirmed\n\n` +
+    const noteBody = `Request to Book - Quote/Rate Saved\n\n` +
       `Carrier: ${rate.carrierName}\n` +
       `Service: ${rate.serviceName}\n` +
       `Total Cost: $${rate.totalCost.toFixed(2)}\n` +
-      `Confirmation: ${booking.confirmationNumber || booking.bookingIdExternal || 'N/A'}`;
+      `Confirmation: ${saveResult.confirmationNumber || saveResult.savedQuoteId || 'N/A'}`;
 
     const notePayload: any = {
       properties: {
@@ -190,6 +180,7 @@ async function createHubSpotBookingNote(
 }
 
 // POST /api/book
+// Request to book - Saves quote/rate and notifies S2 team (does NOT create actual booking)
 // Accepts either quoteId/selectedRateId (database flow) or rate data directly (POC flow)
 router.post('/book', authenticateToken, validateBody(bookingRequestSchema), async (req: AuthRequest, res) => {
   const requestId = crypto.randomUUID();
@@ -197,6 +188,7 @@ router.post('/book', authenticateToken, validateBody(bookingRequestSchema), asyn
   try {
     const userId = req.user!.userId;
     const clientId = req.user!.clientId;
+    const userEmail = req.user!.email;
     const { quoteId, selectedRateId, rate, originalRequestPayload: providedRequestPayload } = req.body;
 
     let rateData: any;
@@ -263,67 +255,61 @@ router.post('/book', authenticateToken, validateBody(bookingRequestSchema), asyn
       });
     }
 
-    // Call Ship2Primus API
-    let bookingResult;
+    // Call Ship2Primus Save API (saves quote and notifies S2 team)
+    let saveResult;
     try {
-      bookingResult = await callShip2PrimusBook(
+      saveResult = await callShip2PrimusSave(
         { requestPayloadJson: originalRequestPayload },
         rateData
       );
     } catch (error: any) {
-      console.error('[BOOK] Booking API error:', error);
+      console.error('[BOOK] Save API error:', error);
       return res.status(502).json({
         requestId,
         errorCode: 'UPSTREAM_ERROR',
-        message: 'Failed to create booking with shipping provider',
+        message: 'Failed to save quote/rate request',
         details: process.env.NODE_ENV === 'development' ? error.message : undefined,
       });
     }
 
     // Save booking to database (optional - try to save if quoteId exists)
-    let savedBooking: any = null;
-    if (quoteId && selectedRateId) {
-      try {
-        const { data: booking, error: bookingError } = await supabaseAdmin
-          .from('bookings')
-          .insert({
-            client_id: clientId,
-            user_id: userId,
-            quote_request_id: quoteId,
-            rate_id: selectedRateId,
-            booking_id_external: bookingResult.bookingId,
-            confirmation_number: bookingResult.confirmationNumber,
-            status: bookingResult.status,
-            raw_json: bookingResult.details as any,
-          })
-          .select('id, booking_id_external, confirmation_number, status')
-          .single();
+    // Note: We don't save to bookings table since this is a "request to book" not an actual booking
+    // The save endpoint handles notification to S2 team
+    
+    // Create HubSpot note for request to book (non-blocking)
+    if (userEmail) {
+      createHubSpotRequestToBookNote(
+        userEmail,
+        rateData,
+        saveResult
+      ).catch((err) => {
+        console.error('[BOOK] HubSpot note creation failed (non-blocking):', err);
+      });
+    }
 
-        if (!bookingError && booking) {
-          savedBooking = booking;
-          
-          // Audit log
-          await supabaseAdmin.from('audit_logs').insert({
-            client_id: clientId,
-            user_id: userId,
-            action: 'CREATE_BOOKING',
-            metadata_json: {
-              bookingId: booking.id,
-              quoteRequestId: quoteId,
-              rateId: selectedRateId,
-            },
-          });
-        }
-      } catch (dbError) {
-        console.warn('[BOOK] Database save failed (non-critical):', dbError);
-      }
+    // Audit log for request to book
+    try {
+      await supabaseAdmin.from('audit_logs').insert({
+        client_id: clientId,
+        user_id: userId,
+        action: 'REQUEST_TO_BOOK',
+        metadata_json: {
+          quoteRequestId: quoteId || null,
+          rateId: selectedRateId || rateData.rateId,
+          savedQuoteId: saveResult.savedQuoteId,
+          confirmationNumber: saveResult.confirmationNumber,
+        },
+      });
+    } catch (dbError) {
+      console.warn('[BOOK] Audit log failed (non-critical):', dbError);
     }
 
     res.json({
       requestId,
-      bookingId: savedBooking?.id || bookingResult.bookingId,
-      confirmationNumber: bookingResult.confirmationNumber,
-      status: bookingResult.status,
+      savedQuoteId: saveResult.savedQuoteId,
+      confirmationNumber: saveResult.confirmationNumber,
+      status: saveResult.status,
+      message: 'Quote/rate request saved successfully. S2 team will be notified.',
       rate: {
         carrierName: rateData.carrierName,
         serviceName: rateData.serviceName,
@@ -336,7 +322,7 @@ router.post('/book', authenticateToken, validateBody(bookingRequestSchema), asyn
     res.status(500).json({
       requestId,
       errorCode: 'INTERNAL_ERROR',
-      message: 'Failed to process booking',
+      message: 'Failed to process request to book',
       details: process.env.NODE_ENV === 'development' ? error.message : undefined,
     });
   }

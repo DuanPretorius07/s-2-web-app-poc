@@ -641,7 +641,7 @@ ${top3Rates.map(rate => `   ${rate}`).join('\n')}`;
       return;
     }
 
-    const noteResult = await noteResponse.json();
+    const noteResult = await noteResponse.json() as { id?: string };
     console.log(`[HubSpot] ✅ Note created successfully for contact ${contactId}:`, noteResult.id);
   } catch (error) {
     console.error('[HubSpot] Note creation error:', error);

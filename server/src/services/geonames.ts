@@ -150,7 +150,7 @@ export async function getCountries(): Promise<Country[]> {
   // #endregion
 
   try {
-    const data = await geonamesRequest('/countryInfoJSON', {});
+    const data = await geonamesRequest<any>('/countryInfoJSON', {});
 
     const countries = (data.geonames || []);
     
@@ -196,7 +196,7 @@ export async function getStates(countryCode: string): Promise<State[]> {
   try {
     const geonameId = await getCountryGeonameId(countryCode);
     
-    const data = await geonamesRequest('/childrenJSON', {
+    const data = await geonamesRequest<any>('/childrenJSON', {
       geonameId: geonameId,
     });
 
@@ -234,7 +234,7 @@ export async function getCities(countryCode: string, adminCode1: string): Promis
   if (cached) return cached;
 
   try {
-    const data = await geonamesRequest('/searchJSON', {
+    const data = await geonamesRequest<any>('/searchJSON', {
       country: countryCode,
       adminCode1: adminCode1,
       featureClass: 'P', // Populated places (cities)
@@ -283,7 +283,7 @@ export async function getPostalCodes(
   if (cached) return cached;
 
   try {
-    const data = await geonamesRequest('/postalCodeSearchJSON', {
+    const data = await geonamesRequest<any>('/postalCodeSearchJSON', {
       country: countryCode,
       adminCode1: adminCode1,
       placeName: placeName.trim(),
@@ -332,7 +332,7 @@ export async function lookupPostalCode(
   postalCode: string
 ): Promise<PostalCode | null> {
   try {
-    const data = await geonamesRequest('/postalCodeLookupJSON', {
+    const data = await geonamesRequest<any>('/postalCodeLookupJSON', {
       postalcode: postalCode,
       country: countryCode,
     });

@@ -174,7 +174,7 @@ export default function RatesTable({ rates, onBook, loading }: RatesTableProps) 
                 <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                   {rate.booked ? (
                     <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-semibold bg-green-100 text-green-800">
-                      ✓ Booked
+                      ✓ Request Submitted
                     </span>
                   ) : (
                     <button
@@ -208,7 +208,7 @@ export default function RatesTable({ rates, onBook, loading }: RatesTableProps) 
                               d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
                             />
                           </svg>
-                          Booking...
+                          Submitting...
                         </>
                       ) : (
                         'Request to Book'

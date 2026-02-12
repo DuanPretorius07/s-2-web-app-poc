@@ -409,14 +409,14 @@ export default function QuoteForm() {
     // Find the selected rate
     const selectedRate = rates.find(r => r.id === rateId);
     if (!selectedRate) {
-      console.error('[QuoteForm] Rate not found for booking:', rateId);
+      console.error('[QuoteForm] Rate not found for request to book:', rateId);
       setBookingState({ status: 'error', error: 'Selected rate not found' });
       return;
     }
 
     // Prevent duplicate submissions
     if (bookingState.status === 'booking') {
-      console.warn('[QuoteForm] Booking already in progress');
+      console.warn('[QuoteForm] Request to book already in progress');
       return;
     }
 
@@ -493,10 +493,10 @@ export default function QuoteForm() {
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.message || 'Failed to book shipment');
+        throw new Error(data.message || 'Failed to save quote/rate request');
       }
 
-      // Mark rate as booked
+      // Mark rate as requested
       setRates(prevRates =>
         prevRates.map(rate =>
           rate.id === rateId ? { ...rate, booked: true } : rate
@@ -505,19 +505,19 @@ export default function QuoteForm() {
 
       setBookingState({
         status: 'success',
-        bookingId: data.bookingId,
+        bookingId: data.savedQuoteId || data.bookingId,
         confirmationNumber: data.confirmationNumber,
       });
 
-      console.log('[QuoteForm] Booking successful:', {
-        bookingId: data.bookingId,
+      console.log('[QuoteForm] Request to book successful:', {
+        savedQuoteId: data.savedQuoteId || data.bookingId,
         confirmationNumber: data.confirmationNumber,
       });
     } catch (error) {
-      console.error('[QuoteForm] Booking error:', error);
+      console.error('[QuoteForm] Request to book error:', error);
       setBookingState({
         status: 'error',
-        error: error instanceof Error ? error.message : 'Failed to book shipment',
+        error: error instanceof Error ? error.message : 'Failed to save quote/rate request',
       });
     }
   };
@@ -857,7 +857,7 @@ export default function QuoteForm() {
             onClick={() => setShowRatesModal(true)}
             className="w-full py-3 px-6 rounded-lg font-semibold text-sm sm:text-base shadow-md hover:shadow-lg transition-colors bg-blue-600 hover:bg-blue-700 text-white"
           >
-            📋 View Available Rates & Book
+            📋 View Available Rates & Request to Book
           </button>
         </div>
       )}
@@ -881,13 +881,13 @@ export default function QuoteForm() {
         />
       )}
 
-      {/* Booking Error Message */}
+      {/* Request to Book Error Message */}
       {bookingState.status === 'error' && (
         <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-lg">
           <div className="flex items-center">
             <span className="text-red-600 mr-2">⚠️</span>
             <div>
-              <p className="text-red-800 font-semibold">Booking Failed</p>
+              <p className="text-red-800 font-semibold">Request to Book Failed</p>
               <p className="text-red-600 text-sm">{bookingState.error}</p>
             </div>
             <button
@@ -904,7 +904,6 @@ export default function QuoteForm() {
       {showTokensNotification && tokensNotificationData && (
         <RateTokensUsedNotification
           tokensRemaining={tokensNotificationData.remaining}
-          tokensUsed={tokensNotificationData.used}
           onClose={() => {
             setShowTokensNotification(false);
             setTokensNotificationData(null);

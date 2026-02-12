@@ -19,7 +19,7 @@ export default function BookingConfirmation({
             </svg>
           </div>
           <div className="ml-3 flex-1">
-            <h3 className="text-lg font-medium text-green-800 mb-4">Booking Successful!</h3>
+            <h3 className="text-lg font-medium text-green-800 mb-4">Request to Book Submitted!</h3>
             <div className="space-y-3">
               {confirmationNumber && (
                 <div>
@@ -31,14 +31,14 @@ export default function BookingConfirmation({
               )}
               {bookingId && (
                 <div>
-                  <dt className="text-sm font-medium text-gray-700">Booking ID</dt>
+                  <dt className="text-sm font-medium text-gray-700">Quote ID</dt>
                   <dd className="mt-1 text-sm text-gray-900">
                     {bookingId}
                   </dd>
                 </div>
               )}
               <p className="text-sm text-gray-600 mt-4">
-                Your booking request has been submitted successfully. S2 International will contact you shortly to confirm your shipment.
+                Your quote/rate request has been saved successfully. S2 International will be notified and will contact you shortly to process your booking.
               </p>
             </div>
           </div>

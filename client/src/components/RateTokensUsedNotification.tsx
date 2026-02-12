@@ -2,13 +2,11 @@ import { useState, useEffect } from 'react';
 
 interface RateTokensUsedNotificationProps {
   tokensRemaining: number | null | undefined;
-  tokensUsed: number | null | undefined;
   onClose: () => void;
 }
 
 export default function RateTokensUsedNotification({
   tokensRemaining,
-  tokensUsed,
   onClose,
 }: RateTokensUsedNotificationProps) {
   const [show, setShow] = useState(true);
