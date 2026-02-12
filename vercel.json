@@ -8,8 +8,8 @@
       "destination": "/api/serverless"
     },
     {
-      "source": "/(.*)",
-      "destination": "/$1"
+      "source": "/((?!api/).*)",
+      "destination": "/index.html"
     }
   ],
   "functions": {
