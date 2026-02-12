@@ -142,7 +142,7 @@ async function callShip2PrimusSave(quoteRequest: any, rate: any, userInfo?: { em
       status: data.status || 'saved',
       details: data,
     };
-  } catch (error) {
+  } catch (error: any) {
     // #region agent log
     fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'book.ts:callShip2PrimusSave:error',message:'Save API call failed',data:{errorName:error?.name,errorMessage:error?.message,errorStack:error?.stack?.substring(0,500)},timestamp:Date.now(),runId:'pre-fix',hypothesisId:'H1,H2'})}).catch(()=>{});
     // #endregion
