@@ -26,7 +26,7 @@ const bookingRequestSchema = z.object({
  * Request to book (save quote/rate) - This saves the quote and notifies S2 team
  * Note: This does NOT create a booking, it only saves the quote for S2 processing
  */
-async function callShip2PrimusSave(quoteRequest: any, rate: any): Promise<{
+async function callShip2PrimusSave(quoteRequest: any, rate: any, userInfo?: { email?: string; firstname?: string; lastname?: string; phone?: string }): Promise<{
   savedQuoteId?: string;
   confirmationNumber?: string;
   status: string;
@@ -49,27 +49,81 @@ async function callShip2PrimusSave(quoteRequest: any, rate: any): Promise<{
   }
 
   try {
-    // Construct save payload - includes original quote request + selected rate
-    // The save endpoint saves the quote/rate and notifies S2 team
+    // Construct save payload matching Postman format:
+    // { rateId, carrierName, serviceName, totalCost, currency, shipper, recipient, packages }
     const originalPayload = quoteRequest.requestPayloadJson || {};
     
-    // Save endpoint expects original request payload with selected rate ID
-    const savePayload: any = originalPayload && Object.keys(originalPayload).length > 0
-      ? {
-          ...originalPayload,
-          selectedRateId: rate.rateId,
-        }
-      : {
-          // Fallback: construct minimal payload if original is missing
-          selectedRateId: rate.rateId,
-          rate: {
-            rateId: rate.rateId,
-            carrierName: rate.carrierName,
-            serviceName: rate.serviceName,
-            totalCost: rate.totalCost,
-            currency: rate.currency || 'USD',
-          },
-        };
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'book.ts:callShip2PrimusSave:entry',message:'Constructing save payload',data:{hasOriginalPayload:!!originalPayload,originalPayloadKeys:originalPayload?Object.keys(originalPayload):[],rateId:rate.rateId,carrierName:rate.carrierName,hasUserInfo:!!userInfo,userEmail:userInfo?.email},timestamp:Date.now(),runId:'pre-fix',hypothesisId:'H1,H2'})}).catch(()=>{});
+    // #endregion
+
+    // Extract origin/destination from original payload
+    const originCity = originalPayload.originCity || '';
+    const originState = originalPayload.originState || '';
+    const originZipcode = originalPayload.originZipcode || '';
+    const originCountry = originalPayload.originCountry || 'US';
+    const destinationCity = originalPayload.destinationCity || '';
+    const destinationState = originalPayload.destinationState || '';
+    const destinationZipcode = originalPayload.destinationZipcode || '';
+    const destinationCountry = originalPayload.destinationCountry || 'US';
+    
+    // Extract freight info for packages
+    const freightInfo = Array.isArray(originalPayload.freightInfo) && originalPayload.freightInfo.length > 0
+      ? originalPayload.freightInfo[0]
+      : {};
+    
+    // Construct shipper object (origin)
+    const shipperName = userInfo?.firstname && userInfo?.lastname
+      ? `${userInfo.firstname} ${userInfo.lastname}`
+      : userInfo?.email?.split('@')[0] || 'Shipper';
+    
+    // Construct recipient object (destination) - using same info for now
+    // In a real scenario, recipient might be different, but for POC we'll use same user
+    const recipientName = shipperName;
+    
+    // Build packages array from freightInfo
+    const packages = [{
+      weight: freightInfo.weight || 0,
+      weightUnit: 'LB',
+      length: freightInfo.length || 0,
+      width: freightInfo.width || 0,
+      height: freightInfo.height || 0,
+      dimensionUnit: 'IN',
+    }];
+    
+    // Construct payload matching Postman format
+    const savePayload = {
+      rateId: rate.rateId, // Top-level rateId (required by API)
+      carrierName: rate.carrierName,
+      serviceName: rate.serviceName,
+      totalCost: rate.totalCost,
+      currency: rate.currency || 'USD',
+      shipper: {
+        name: shipperName,
+        address: '', // Not available in current form, leave empty
+        city: originCity,
+        state: originState,
+        postalCode: originZipcode,
+        country: originCountry,
+        phone: userInfo?.phone || '',
+        email: userInfo?.email || '',
+      },
+      recipient: {
+        name: recipientName,
+        address: '', // Not available in current form, leave empty
+        city: destinationCity,
+        state: destinationState,
+        postalCode: destinationZipcode,
+        country: destinationCountry,
+        phone: userInfo?.phone || '',
+        email: userInfo?.email || '',
+      },
+      packages: packages,
+    };
+
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'book.ts:callShip2PrimusSave:payload',message:'Save payload constructed',data:{rateId:savePayload.rateId,hasShipper:!!savePayload.shipper,hasRecipient:!!savePayload.recipient,packagesCount:savePayload.packages.length,shipperCity:savePayload.shipper.city,recipientCity:savePayload.recipient.city},timestamp:Date.now(),runId:'pre-fix',hypothesisId:'H1,H2'})}).catch(()=>{});
+    // #endregion
 
     console.log('[SAVE] Request to book payload:', JSON.stringify(savePayload, null, 2));
 
@@ -78,6 +132,10 @@ async function callShip2PrimusSave(quoteRequest: any, rate: any): Promise<{
       body: JSON.stringify(savePayload),
     });
 
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'book.ts:callShip2PrimusSave:success',message:'Save API call successful',data:{hasData:!!data,dataKeys:data?Object.keys(data):[],savedQuoteId:data?.id||data?.savedQuoteId||data?.quoteId,confirmationNumber:data?.confirmationNumber||data?.confirmation_number||data?.confirmation},timestamp:Date.now(),runId:'pre-fix',hypothesisId:'H1,H2'})}).catch(()=>{});
+    // #endregion
+
     return {
       savedQuoteId: data.id || data.savedQuoteId || data.quoteId,
       confirmationNumber: data.confirmationNumber || data.confirmation_number || data.confirmation,
@@ -85,6 +143,9 @@ async function callShip2PrimusSave(quoteRequest: any, rate: any): Promise<{
       details: data,
     };
   } catch (error) {
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'book.ts:callShip2PrimusSave:error',message:'Save API call failed',data:{errorName:error?.name,errorMessage:error?.message,errorStack:error?.stack?.substring(0,500)},timestamp:Date.now(),runId:'pre-fix',hypothesisId:'H1,H2'})}).catch(()=>{});
+    // #endregion
     console.error('Ship2Primus save API error:', error);
     throw error;
   }
@@ -255,12 +316,34 @@ router.post('/book', authenticateToken, validateBody(bookingRequestSchema), asyn
       });
     }
 
+    // Fetch user details for shipper/recipient info
+    let userInfo: { email?: string; firstname?: string; lastname?: string; phone?: string } = {
+      email: userEmail,
+    };
+    
+    try {
+      const { data: userData } = await supabaseAdmin
+        .from('users')
+        .select('firstname, lastname, phone')
+        .eq('id', userId)
+        .single();
+      
+      if (userData) {
+        userInfo.firstname = userData.firstname || undefined;
+        userInfo.lastname = userData.lastname || undefined;
+        userInfo.phone = userData.phone || undefined;
+      }
+    } catch (userError) {
+      console.warn('[BOOK] Could not fetch user details, using email only:', userError);
+    }
+
     // Call Ship2Primus Save API (saves quote and notifies S2 team)
     let saveResult;
     try {
       saveResult = await callShip2PrimusSave(
         { requestPayloadJson: originalRequestPayload },
-        rateData
+        rateData,
+        userInfo
       );
     } catch (error: any) {
       console.error('[BOOK] Save API error:', error);

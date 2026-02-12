@@ -237,11 +237,17 @@ app.get('/restricted', (req, res) => {
   res.sendFile(path.join(__dirname, '../public/restricted.html'));
 });
 
-// Serve static files in production
-if (process.env.NODE_ENV === 'production') {
+// Serve static files in production (only when NOT in Vercel)
+// In Vercel, static files are served separately via outputDirectory config
+if (process.env.NODE_ENV === 'production' && process.env.VERCEL !== '1') {
   app.use(express.static(path.join(__dirname, '../client/dist')));
   
-  app.get('*', (req, res) => {
+  // Catch-all route for SPA - only for non-API routes and non-Vercel
+  app.get('*', (req, res, next) => {
+    // Skip API routes - they should be handled by Express routes above
+    if (req.path.startsWith('/api')) {
+      return next();
+    }
     res.sendFile(path.join(__dirname, '../client/dist/index.html'));
   });
 }
