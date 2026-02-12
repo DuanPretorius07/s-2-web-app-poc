@@ -80,7 +80,7 @@ export default function AnimatedBackground() {
   // #endregion
 
   return (
-    <div className="fixed inset-0 overflow-hidden pointer-events-none" style={{ zIndex: -10, backgroundColor: '#f8f8f8', opacity: 0.3 }} data-animated-bg>
+    <div className="fixed inset-0 overflow-hidden pointer-events-none" style={{ zIndex: -10, backgroundColor: '#f8f8f8', opacity: 0.4 }} data-animated-bg>
       {/* Static striped background - no animation */}
       <div 
         className="absolute -top-[100%] -left-[100%] w-[300%] h-[300%] flex flex-col"

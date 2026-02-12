@@ -26,7 +26,6 @@ export default function RateTokensUsedNotification({
   if (!show) return null;
 
   const remaining = tokensRemaining ?? 0;
-  const used = tokensUsed ?? 0;
   const isLow = remaining <= 1;
   const isEmpty = remaining === 0;
 

@@ -106,7 +106,6 @@ export default function QuoteForm() {
     confirmationNumber?: string;
     error?: string;
   }>({ status: 'idle' });
-  const [originalRequestPayload, setOriginalRequestPayload] = useState<any>(null);
   const [showRatesModal, setShowRatesModal] = useState(false);
   const [formHasChanged, setFormHasChanged] = useState(false);
   const [showTokensNotification, setShowTokensNotification] = useState(false);
@@ -368,8 +367,6 @@ export default function QuoteForm() {
         })),
       });
 
-      // Store original request payload for booking
-      setOriginalRequestPayload(payload);
 
       if (!receivedRates.length) {
         console.warn('[QuoteForm] No rates in response');

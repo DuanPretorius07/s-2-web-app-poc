@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import RatesTable from './RatesTable';
 
 interface Rate {
