@@ -8,7 +8,7 @@ import { Request, Response, NextFunction } from 'express';
  * 
  * Developer bypass: Add ?dev=true to the URL to bypass restrictions
  */
-const ALLOWED_COUNTRIES = ['US', 'CA'];
+const ALLOWED_COUNTRIES = ['US', 'CA', 'ZA']; // Added ZA for demo purposes
 
 export function geoRestriction(req: Request, res: Response, next: NextFunction) {
   // ALWAYS allow dev bypass FIRST (before any other checks)

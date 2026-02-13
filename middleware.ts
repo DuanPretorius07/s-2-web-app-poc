@@ -11,8 +11,8 @@ export default function middleware(req: Request): Response {
   // Get country from Vercel's geo headers
   const country = (req as any).geo?.country || 'UNKNOWN';
   
-  // Allowed countries
-  const allowedCountries = ['CA', 'US'];
+  // Allowed countries (added ZA for demo purposes)
+  const allowedCountries = ['CA', 'US', 'ZA'];
   
   // Developer bypass via query parameter
   const url = new URL(req.url);
