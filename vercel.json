@@ -8,10 +8,6 @@
       "destination": "/api/serverless"
     },
     {
-      "source": "/restricted",
-      "destination": "/api/serverless"
-    },
-    {
       "source": "/:path*",
       "destination": "/index.html"
     }

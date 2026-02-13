@@ -67,7 +67,7 @@ import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import rateLimit from 'express-rate-limit';
 import { errorHandler } from './src/middleware/errorHandler.js';
-import { geoRestriction } from './src/middleware/geoRestriction.js';
+// import { geoRestriction } from './src/middleware/geoRestriction.js'; // Disabled - geo-restriction removed
 import authRoutes from './src/routes/auth.js';
 import ratesRoutes from './src/routes/rates.js';
 import bookRoutes from './src/routes/book.js';
@@ -178,79 +178,7 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-// Restricted page - BEFORE geo-restriction (just shows the message)
-app.get('/restricted', (req, res) => {
-  res.status(403).send(`
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Access Restricted</title>
-  <style>
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      min-height: 100vh;
-      margin: 0;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    }
-    .container {
-      background: white;
-      padding: 3rem;
-      border-radius: 1rem;
-      box-shadow: 0 20px 60px rgba(0,0,0,0.3);
-      max-width: 500px;
-      text-align: center;
-    }
-    h1 { color: #333; margin-bottom: 1rem; }
-    p { color: #666; line-height: 1.6; margin-bottom: 2rem; }
-    .icon { font-size: 4rem; margin-bottom: 1rem; }
-    .contact-btn {
-      display: inline-block;
-      background: #667eea;
-      color: white;
-      padding: 0.75rem 2rem;
-      border-radius: 0.5rem;
-      text-decoration: none;
-      font-weight: 600;
-      transition: background 0.3s;
-    }
-    .contact-btn:hover { background: #5568d3; }
-    .dev-tip {
-      margin-top: 2rem;
-      padding: 1rem;
-      background: #f0f0f0;
-      border-radius: 0.5rem;
-      font-size: 0.9rem;
-      color: #666;
-    }
-  </style>
-</head>
-<body>
-  <div class="container">
-    <div class="icon">🌍</div>
-    <h1>Access Restricted</h1>
-    <p>
-      This application is currently only available to users in 
-      <strong>Canada</strong> and the <strong>United States</strong>.
-    </p>
-    <p>
-      If you believe you should have access, please contact us.
-    </p>
-    <a href="https://www.s-2international.com/contact" class="contact-btn" target="_blank">
-      Contact S2 International
-    </a>
-    <div class="dev-tip">
-      <strong>💡 Developers:</strong> Add <code>?dev=true</code> to any URL to bypass geo-restriction for testing.
-    </div>
-  </div>
-</body>
-</html>
-  `);
-});
+// Restricted endpoint removed - no longer needed
 
 // GEO-RESTRICTION MIDDLEWARE DISABLED
 // Uncomment the lines below to re-enable geo-restriction
