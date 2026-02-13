@@ -24,7 +24,9 @@ export function geoRestriction(req: Request, res: Response, next: NextFunction) 
   });
 
   // STEP 1: Check dev bypass FIRST
-  if (req.query.dev === 'true' || req.query.dev === true) {
+  // req.query.dev is always a string (or undefined), never a boolean
+  const devParam = typeof req.query.dev === 'string' ? req.query.dev : String(req.query.dev || '');
+  if (devParam === 'true') {
     console.log('[Geo] ✅ Dev bypass activated for:', req.path);
     return next();
   }
