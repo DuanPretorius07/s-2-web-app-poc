@@ -252,12 +252,11 @@ app.get('/restricted', (req, res) => {
   `);
 });
 
-// APPLY GEO-RESTRICTION MIDDLEWARE HERE
-// This applies to ALL routes defined AFTER this line
-// Note: In production, this only affects API routes since React SPA is served by Vercel
-if (process.env.NODE_ENV === 'production' && process.env.ENABLE_GEO_RESTRICTION !== 'false') {
-  app.use(geoRestriction);
-}
+// GEO-RESTRICTION MIDDLEWARE DISABLED
+// Uncomment the lines below to re-enable geo-restriction
+// if (process.env.NODE_ENV === 'production' && process.env.ENABLE_GEO_RESTRICTION !== 'false') {
+//   app.use(geoRestriction);
+// }
 
 // Rate limiting
 // Use custom key generator to avoid trust proxy warnings
