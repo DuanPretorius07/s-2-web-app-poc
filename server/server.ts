@@ -59,9 +59,6 @@ console.log('[SERVER] Environment check:', {
   hasGeonamesUsername: !!process.env.GEONAMES_USERNAME,
 });
 
-// #region agent log
-fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'server.ts:env-check',message:'Environment variables check after dotenv load',data:{geonamesUsername:process.env.GEONAMES_USERNAME||'NOT_SET',hasGeonamesUsername:!!process.env.GEONAMES_USERNAME,usernameType:typeof process.env.GEONAMES_USERNAME,allGeonamesKeys:Object.keys(process.env).filter(k=>k.toLowerCase().includes('geonames')).join(',')},timestamp:Date.now(),runId:'debug-geonames-env',hypothesisId:'H3'})}).catch(()=>{});
-// #endregion
 
 // Now import everything else (supabaseClient will use the loaded env vars)
 // In Vercel, env vars are available immediately, so static imports are fine
@@ -139,16 +136,29 @@ app.use(
 app.use(cookieParser());
 app.use(express.json());
 
-// Geo-restriction middleware (only in production, can be disabled if needed)
-// Apply to all routes except API and restricted page
-if (process.env.NODE_ENV === 'production' && process.env.ENABLE_GEO_RESTRICTION !== 'false') {
-  app.use((req, res, next) => {
-    // Skip geo-restriction for API routes and restricted page
-    if (req.path.startsWith('/api') || req.path === '/restricted') {
-      return next();
-    }
-    return geoRestriction(req, res, next);
+// Logging middleware
+app.use((req, res, next) => {
+  console.log(`${req.method} ${req.path}`, {
+    query: req.query,
+    ip: req.ip,
+    country: req.headers['x-vercel-ip-country'],
   });
+  next();
+});
+
+// Health check (no geo-restriction - should work from anywhere)
+app.get('/api/health', (req, res) => {
+  res.json({ 
+    status: 'ok', 
+    timestamp: new Date().toISOString(),
+    env: process.env.NODE_ENV,
+  });
+});
+
+// Apply geo-restriction middleware to ALL routes except /api/health
+// Geo-restriction middleware will handle its own exceptions for /api/* and /restricted
+if (process.env.NODE_ENV === 'production' && process.env.ENABLE_GEO_RESTRICTION !== 'false') {
+  app.use(geoRestriction);
 }
 
 // Rate limiting
@@ -169,17 +179,12 @@ const apiLimiter = rateLimit({
   legacyHeaders: false,
 });
 
-// Routes
+// API Routes (these should work from any country - geo-restriction middleware allows /api/*)
 app.use('/api/auth', authLimiter, authRoutes);
 app.use('/api', apiLimiter, ratesRoutes);
 app.use('/api', apiLimiter, bookRoutes);
 app.use('/api/history', apiLimiter, historyRoutes);
 app.use('/api/locations', apiLimiter, locationRoutes);
-
-// Health check
-app.get('/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
-});
 
 // Supabase connection test
 app.get('/api/test/supabase', async (req, res) => {
@@ -233,36 +238,10 @@ app.get('/api/test/supabase', async (req, res) => {
   }
 });
 
-// Serve restricted page
+// Restricted page route (must come AFTER geo-restriction middleware)
+// Serve as inline HTML - no file system access needed in Vercel
 app.get('/restricted', (req, res) => {
-  // In Vercel, __dirname is /var/task/server/dist/
-  // public/restricted.html is at /var/task/public/restricted.html
-  // Try multiple possible paths
-  const possiblePaths = [
-    path.join(__dirname, '../../public/restricted.html'), // From server/dist/ -> public/
-    path.join(__dirname, '../public/restricted.html'),   // Fallback
-    path.join(process.cwd(), 'public/restricted.html'), // From root
-  ];
-  
-  // Try to find the file
-  let filePath = possiblePaths[0];
-  for (const p of possiblePaths) {
-    try {
-      if (fs.existsSync(p)) {
-        filePath = p;
-        break;
-      }
-    } catch (err) {
-      // Continue to next path
-    }
-  }
-  
-  res.sendFile(filePath, (err) => {
-    if (err) {
-      console.error('[RESTRICTED] Error serving restricted.html:', err);
-      console.error('[RESTRICTED] Tried paths:', possiblePaths);
-      // Fallback: send HTML directly
-      res.status(200).send(`
+  res.status(403).send(`
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -272,51 +251,71 @@ app.get('/restricted', (req, res) => {
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-      min-height: 100vh;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', Oxygen, Ubuntu, Cantarell, sans-serif;
       display: flex;
-      align-items: center;
       justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
       padding: 20px;
     }
     .container {
       background: white;
-      border-radius: 12px;
-      padding: 48px;
-      max-width: 600px;
-      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+      padding: 3rem;
+      border-radius: 1rem;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+      max-width: 500px;
       text-align: center;
     }
-    h1 { color: #1a202c; font-size: 32px; margin-bottom: 16px; }
-    p { color: #4a5568; font-size: 18px; line-height: 1.6; margin-bottom: 24px; }
-    .icon { font-size: 64px; margin-bottom: 24px; }
-    .contact-info {
-      background: #f7fafc;
-      border-radius: 8px;
-      padding: 24px;
-      margin-top: 32px;
+    h1 {
+      color: #333;
+      margin-bottom: 1rem;
+      font-size: 2rem;
     }
-    a { color: #667eea; text-decoration: none; }
-    a:hover { text-decoration: underline; }
+    p {
+      color: #666;
+      line-height: 1.6;
+      margin-bottom: 1.5rem;
+      font-size: 1.1rem;
+    }
+    .icon {
+      font-size: 4rem;
+      margin-bottom: 1rem;
+    }
+    .contact-btn {
+      display: inline-block;
+      background: #667eea;
+      color: white;
+      padding: 0.75rem 2rem;
+      border-radius: 0.5rem;
+      text-decoration: none;
+      font-weight: 600;
+      transition: background 0.3s;
+    }
+    .contact-btn:hover {
+      background: #5568d3;
+    }
   </style>
 </head>
 <body>
   <div class="container">
     <div class="icon">🌍</div>
     <h1>Access Restricted</h1>
-    <p>We're sorry, but this shipping portal is currently only available in <strong>Canada</strong> and the <strong>United States</strong>.</p>
-    <p>If you're located in one of these countries and believe this is an error, please contact our support team.</p>
-    <div class="contact-info">
-      <p><strong>Need Assistance?</strong></p>
-      <p><a href="https://www.s-2international.com/contact" target="_blank">Contact S2 International</a></p>
-    </div>
+    <p>
+      This application is currently only available to users in 
+      <strong>Canada</strong> and the <strong>United States</strong>.
+    </p>
+    <p>
+      If you believe you should have access or would like to inquire about 
+      availability in your region, please contact us.
+    </p>
+    <a href="https://www.s-2international.com/contact" class="contact-btn" target="_blank">
+      Contact S2 International
+    </a>
   </div>
 </body>
 </html>
-      `);
-    }
-  });
+  `);
 });
 
 // Serve static files in production (only when NOT in Vercel)
