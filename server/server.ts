@@ -152,14 +152,13 @@ app.get('/api/health', (req, res) => {
     status: 'ok', 
     timestamp: new Date().toISOString(),
     env: process.env.NODE_ENV,
+    country: req.headers['x-vercel-ip-country'] || 'unknown',
   });
 });
 
-// Apply geo-restriction middleware to ALL routes except /api/health
-// Geo-restriction middleware will handle its own exceptions for /api/* and /restricted
-if (process.env.NODE_ENV === 'production' && process.env.ENABLE_GEO_RESTRICTION !== 'false') {
-  app.use(geoRestriction);
-}
+// NOTE: Geo-restriction is now ONLY applied to specific API routes below
+// This allows the React SPA to load for everyone, and geo-restriction
+// happens when they try to use the API (login, get rates, etc.)
 
 // Rate limiting
 // keyGenerator uses req.ip which respects trust proxy setting
@@ -179,12 +178,23 @@ const apiLimiter = rateLimit({
   legacyHeaders: false,
 });
 
-// API Routes (these should work from any country - geo-restriction middleware allows /api/*)
-app.use('/api/auth', authLimiter, authRoutes);
-app.use('/api', apiLimiter, ratesRoutes);
-app.use('/api', apiLimiter, bookRoutes);
-app.use('/api/history', apiLimiter, historyRoutes);
-app.use('/api/locations', apiLimiter, locationRoutes);
+// API Routes with geo-restriction applied ONLY to these routes
+// The React SPA loads for everyone, but API calls are geo-restricted
+if (process.env.NODE_ENV === 'production' && process.env.ENABLE_GEO_RESTRICTION !== 'false') {
+  // Apply geo-restriction to API routes that need it
+  app.use('/api/auth', authLimiter, geoRestriction, authRoutes);
+  app.use('/api', apiLimiter, geoRestriction, ratesRoutes);
+  app.use('/api', apiLimiter, geoRestriction, bookRoutes);
+  app.use('/api/history', apiLimiter, geoRestriction, historyRoutes);
+  app.use('/api/locations', apiLimiter, geoRestriction, locationRoutes);
+} else {
+  // No geo-restriction in development
+  app.use('/api/auth', authLimiter, authRoutes);
+  app.use('/api', apiLimiter, ratesRoutes);
+  app.use('/api', apiLimiter, bookRoutes);
+  app.use('/api/history', apiLimiter, historyRoutes);
+  app.use('/api/locations', apiLimiter, locationRoutes);
+}
 
 // Supabase connection test
 app.get('/api/test/supabase', async (req, res) => {

@@ -12,7 +12,7 @@
       "destination": "/api/serverless"
     },
     {
-      "source": "/((?!api|_next|restricted).*)",
+      "source": "/:path*",
       "destination": "/index.html"
     }
   ],
