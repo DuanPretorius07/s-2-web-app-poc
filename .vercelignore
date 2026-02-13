@@ -1,0 +1,5 @@
+# Ignore middleware files to prevent geo-restriction
+middleware.ts
+middleware.js
+middleware.ts.disabled
+*.middleware.*

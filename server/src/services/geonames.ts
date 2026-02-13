@@ -272,6 +272,7 @@ export async function getCities(countryCode: string, adminCode1: string): Promis
 
 /**
  * Get postal codes for a city
+ * Improved filtering to work better for both US and Canada
  */
 export async function getPostalCodes(
   countryCode: string,
@@ -283,6 +284,8 @@ export async function getPostalCodes(
   if (cached) return cached;
 
   try {
+    console.log(`[GeoNames] Fetching postal codes for: ${countryCode}, ${adminCode1}, ${placeName}`);
+    
     const data = await geonamesRequest<any>('/postalCodeSearchJSON', {
       country: countryCode,
       adminCode1: adminCode1,
@@ -290,16 +293,50 @@ export async function getPostalCodes(
       maxRows: 100,
     });
 
-    // Filter postal codes to only include those matching the exact city name
-    // GeoNames API may return postal codes for nearby areas, so we filter strictly
-    const normalizedPlaceName = placeName.trim().toLowerCase();
+    console.log(`[GeoNames] Received ${data.postalCodes?.length || 0} postal codes from API`);
+
+    // Normalize place name for matching (remove common suffixes, handle variations)
+    const normalizedPlaceName = placeName.trim().toLowerCase()
+      .replace(/\s+/g, ' ') // Normalize whitespace
+      .replace(/^st\.\s*/i, 'saint ') // Handle "St." prefix
+      .replace(/^st\s+/i, 'saint '); // Handle "St " prefix
+
     const postalCodes: string[] = (data.postalCodes || [])
       .filter((p: any) => {
-        // Match if placeName matches exactly (case-insensitive)
-        const placeNameMatch = p.placeName?.toLowerCase() === normalizedPlaceName;
-        // Also check adminName2 (city name) field
-        const adminName2Match = p.adminName2?.toLowerCase() === normalizedPlaceName;
-        return placeNameMatch || adminName2Match;
+        // For Canada, be more lenient - accept all postal codes in the admin area
+        if (countryCode === 'CA') {
+          // For Canada, check if adminCode1 matches (province/territory)
+          const adminMatch = p.adminCode1 === adminCode1;
+          if (adminMatch) {
+            // Also check if placeName is similar (fuzzy match)
+            const pPlaceName = (p.placeName || '').toLowerCase().replace(/\s+/g, ' ');
+            const pAdminName2 = (p.adminName2 || '').toLowerCase().replace(/\s+/g, ' ');
+            const nameMatch = pPlaceName.includes(normalizedPlaceName) || 
+                            normalizedPlaceName.includes(pPlaceName) ||
+                            pAdminName2.includes(normalizedPlaceName) ||
+                            normalizedPlaceName.includes(pAdminName2);
+            return adminMatch && (nameMatch || pPlaceName.length === 0);
+          }
+          return false;
+        }
+        
+        // For US, use stricter matching but still more lenient than before
+        const pPlaceName = (p.placeName || '').toLowerCase().replace(/\s+/g, ' ');
+        const pAdminName2 = (p.adminName2 || '').toLowerCase().replace(/\s+/g, ' ');
+        
+        // Exact match
+        const exactMatch = pPlaceName === normalizedPlaceName || pAdminName2 === normalizedPlaceName;
+        
+        // Partial match (contains or is contained)
+        const partialMatch = pPlaceName.includes(normalizedPlaceName) || 
+                            normalizedPlaceName.includes(pPlaceName) ||
+                            pAdminName2.includes(normalizedPlaceName) ||
+                            normalizedPlaceName.includes(pAdminName2);
+        
+        // Check adminCode1 matches (state/province)
+        const adminMatch = p.adminCode1 === adminCode1;
+        
+        return adminMatch && (exactMatch || partialMatch);
       })
       .map((p: any) => String(p.postalCode || ''))
       .filter((code: string) => code && code.trim() !== '');
@@ -307,10 +344,19 @@ export async function getPostalCodes(
     // Remove duplicates and sort
     const uniqueCodes = [...new Set(postalCodes)].sort();
     
+    console.log(`[GeoNames] Filtered to ${uniqueCodes.length} unique postal codes`);
+    
     setCache(cacheKey, uniqueCodes);
     return uniqueCodes;
   } catch (error: any) {
     console.error('[GeoNames] Error fetching postal codes:', error.message);
+    console.error('[GeoNames] Error details:', {
+      countryCode,
+      adminCode1,
+      placeName,
+      errorCode: error.code,
+      errorStatus: error.response?.status,
+    });
     
     // Fallback to expired cache
     const expired = cache.get(cacheKey);
