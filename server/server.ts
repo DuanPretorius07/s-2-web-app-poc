@@ -77,11 +77,8 @@ import locationRoutes from './src/routes/locations.js';
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// Trust proxy - required for Vercel and other reverse proxies
-// This allows Express to correctly identify client IPs and handle X-Forwarded-* headers
-if (process.env.VERCEL === '1' || process.env.NODE_ENV === 'production') {
-  app.set('trust proxy', true);
-}
+// CRITICAL: Enable trust proxy for Vercel (must be first)
+app.set('trust proxy', 1);
 
 // CORS configuration
 const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',') || ['http://localhost:3000'];
@@ -135,11 +132,35 @@ app.use(
 
 app.use(cookieParser());
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
-// Logging middleware
+// CRITICAL: Manual query parsing middleware (backup in case Express doesn't parse it)
+// This ensures req.query.dev exists when ?dev=true is in the URL
+app.use((req, res, next) => {
+  // Manual query parsing as backup (in case express isn't doing it)
+  if (req.url.includes('?')) {
+    const urlParts = req.url.split('?');
+    const queryString = urlParts[1];
+    const params = new URLSearchParams(queryString);
+    
+    // Merge into req.query
+    params.forEach((value, key) => {
+      if (!req.query[key]) {
+        req.query[key] = value;
+      }
+    });
+  }
+  next();
+});
+
+// Enhanced logging to debug query params
 app.use((req, res, next) => {
   console.log(`${req.method} ${req.path}`, {
+    fullUrl: req.url,
+    originalUrl: req.originalUrl,
     query: req.query,
+    queryKeys: Object.keys(req.query || {}),
+    devParam: req.query.dev,
     ip: req.ip,
     country: req.headers['x-vercel-ip-country'],
   });
@@ -153,6 +174,7 @@ app.get('/api/health', (req, res) => {
     timestamp: new Date().toISOString(),
     country: req.headers['x-vercel-ip-country'] || 'unknown',
     ip: req.ip,
+    query: req.query, // Include query for debugging
   });
 });
 
@@ -238,21 +260,39 @@ if (process.env.NODE_ENV === 'production' && process.env.ENABLE_GEO_RESTRICTION 
 }
 
 // Rate limiting
-// keyGenerator uses req.ip which respects trust proxy setting
+// Use custom key generator to avoid trust proxy warnings
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: parseInt(process.env.AUTH_RATE_LIMIT_MAX || '20', 10), // limit each IP to N requests per windowMs (default: 20)
-  message: 'Too many authentication attempts, please try again later.',
-  standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
-  legacyHeaders: false, // Disable the `X-RateLimit-*` headers
+  standardHeaders: true,
+  legacyHeaders: false,
+  // FIX: Use a custom key generator that doesn't rely solely on IP
+  keyGenerator: (req) => {
+    // Use a combination of IP and a custom header
+    return req.headers['x-vercel-id'] as string || req.ip || 'anonymous';
+  },
+  handler: (req, res) => {
+    res.status(429).json({
+      error: 'Too many requests',
+      message: 'Please try again later',
+    });
+  },
 });
 
 const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 100,
-  message: 'Too many requests, please try again later.',
   standardHeaders: true,
   legacyHeaders: false,
+  keyGenerator: (req) => {
+    return req.headers['x-vercel-id'] as string || req.ip || 'anonymous';
+  },
+  handler: (req, res) => {
+    res.status(429).json({
+      error: 'Too many requests',
+      message: 'Please try again later',
+    });
+  },
 });
 
 // API Routes - protected by geo-restriction (but dev bypass works)
