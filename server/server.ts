@@ -146,19 +146,96 @@ app.use((req, res, next) => {
   next();
 });
 
-// Health check (no geo-restriction - should work from anywhere)
+// Health check - BEFORE geo-restriction (should work from anywhere)
 app.get('/api/health', (req, res) => {
   res.json({ 
-    status: 'ok', 
+    status: 'ok',
     timestamp: new Date().toISOString(),
-    env: process.env.NODE_ENV,
     country: req.headers['x-vercel-ip-country'] || 'unknown',
+    ip: req.ip,
   });
 });
 
-// NOTE: Geo-restriction is now ONLY applied to specific API routes below
-// This allows the React SPA to load for everyone, and geo-restriction
-// happens when they try to use the API (login, get rates, etc.)
+// Restricted page - BEFORE geo-restriction (just shows the message)
+app.get('/restricted', (req, res) => {
+  res.status(403).send(`
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Access Restricted</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      margin: 0;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    }
+    .container {
+      background: white;
+      padding: 3rem;
+      border-radius: 1rem;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+      max-width: 500px;
+      text-align: center;
+    }
+    h1 { color: #333; margin-bottom: 1rem; }
+    p { color: #666; line-height: 1.6; margin-bottom: 2rem; }
+    .icon { font-size: 4rem; margin-bottom: 1rem; }
+    .contact-btn {
+      display: inline-block;
+      background: #667eea;
+      color: white;
+      padding: 0.75rem 2rem;
+      border-radius: 0.5rem;
+      text-decoration: none;
+      font-weight: 600;
+      transition: background 0.3s;
+    }
+    .contact-btn:hover { background: #5568d3; }
+    .dev-tip {
+      margin-top: 2rem;
+      padding: 1rem;
+      background: #f0f0f0;
+      border-radius: 0.5rem;
+      font-size: 0.9rem;
+      color: #666;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="icon">🌍</div>
+    <h1>Access Restricted</h1>
+    <p>
+      This application is currently only available to users in 
+      <strong>Canada</strong> and the <strong>United States</strong>.
+    </p>
+    <p>
+      If you believe you should have access, please contact us.
+    </p>
+    <a href="https://www.s-2international.com/contact" class="contact-btn" target="_blank">
+      Contact S2 International
+    </a>
+    <div class="dev-tip">
+      <strong>💡 Developers:</strong> Add <code>?dev=true</code> to any URL to bypass geo-restriction for testing.
+    </div>
+  </div>
+</body>
+</html>
+  `);
+});
+
+// APPLY GEO-RESTRICTION MIDDLEWARE HERE
+// This applies to ALL routes defined AFTER this line
+// Note: In production, this only affects API routes since React SPA is served by Vercel
+if (process.env.NODE_ENV === 'production' && process.env.ENABLE_GEO_RESTRICTION !== 'false') {
+  app.use(geoRestriction);
+}
 
 // Rate limiting
 // keyGenerator uses req.ip which respects trust proxy setting
@@ -178,23 +255,22 @@ const apiLimiter = rateLimit({
   legacyHeaders: false,
 });
 
-// API Routes with geo-restriction applied ONLY to these routes
-// The React SPA loads for everyone, but API calls are geo-restricted
-if (process.env.NODE_ENV === 'production' && process.env.ENABLE_GEO_RESTRICTION !== 'false') {
-  // Apply geo-restriction to API routes that need it
-  app.use('/api/auth', authLimiter, geoRestriction, authRoutes);
-  app.use('/api', apiLimiter, geoRestriction, ratesRoutes);
-  app.use('/api', apiLimiter, geoRestriction, bookRoutes);
-  app.use('/api/history', apiLimiter, geoRestriction, historyRoutes);
-  app.use('/api/locations', apiLimiter, geoRestriction, locationRoutes);
-} else {
-  // No geo-restriction in development
-  app.use('/api/auth', authLimiter, authRoutes);
-  app.use('/api', apiLimiter, ratesRoutes);
-  app.use('/api', apiLimiter, bookRoutes);
-  app.use('/api/history', apiLimiter, historyRoutes);
-  app.use('/api/locations', apiLimiter, locationRoutes);
-}
+// API Routes - protected by geo-restriction (but dev bypass works)
+// Note: Geo-restriction middleware is applied globally above, but it skips /api/health
+app.use('/api/auth', authLimiter, authRoutes);
+app.use('/api', apiLimiter, ratesRoutes);
+app.use('/api', apiLimiter, bookRoutes);
+app.use('/api/history', apiLimiter, historyRoutes);
+app.use('/api/locations', apiLimiter, locationRoutes);
+
+// 404 handler for unknown API routes
+app.use('/api/*', (req, res) => {
+  res.status(404).json({
+    error: 'Not Found',
+    path: req.path,
+    message: 'API endpoint not found',
+  });
+});
 
 // Supabase connection test
 app.get('/api/test/supabase', async (req, res) => {
@@ -248,85 +324,6 @@ app.get('/api/test/supabase', async (req, res) => {
   }
 });
 
-// Restricted page route (must come AFTER geo-restriction middleware)
-// Serve as inline HTML - no file system access needed in Vercel
-app.get('/restricted', (req, res) => {
-  res.status(403).send(`
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Access Restricted - S2 International</title>
-  <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', Oxygen, Ubuntu, Cantarell, sans-serif;
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      min-height: 100vh;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-      padding: 20px;
-    }
-    .container {
-      background: white;
-      padding: 3rem;
-      border-radius: 1rem;
-      box-shadow: 0 20px 60px rgba(0,0,0,0.3);
-      max-width: 500px;
-      text-align: center;
-    }
-    h1 {
-      color: #333;
-      margin-bottom: 1rem;
-      font-size: 2rem;
-    }
-    p {
-      color: #666;
-      line-height: 1.6;
-      margin-bottom: 1.5rem;
-      font-size: 1.1rem;
-    }
-    .icon {
-      font-size: 4rem;
-      margin-bottom: 1rem;
-    }
-    .contact-btn {
-      display: inline-block;
-      background: #667eea;
-      color: white;
-      padding: 0.75rem 2rem;
-      border-radius: 0.5rem;
-      text-decoration: none;
-      font-weight: 600;
-      transition: background 0.3s;
-    }
-    .contact-btn:hover {
-      background: #5568d3;
-    }
-  </style>
-</head>
-<body>
-  <div class="container">
-    <div class="icon">🌍</div>
-    <h1>Access Restricted</h1>
-    <p>
-      This application is currently only available to users in 
-      <strong>Canada</strong> and the <strong>United States</strong>.
-    </p>
-    <p>
-      If you believe you should have access or would like to inquire about 
-      availability in your region, please contact us.
-    </p>
-    <a href="https://www.s-2international.com/contact" class="contact-btn" target="_blank">
-      Contact S2 International
-    </a>
-  </div>
-</body>
-</html>
-  `);
-});
 
 // Serve static files in production (only when NOT in Vercel)
 // In Vercel, static files are served separately via outputDirectory config

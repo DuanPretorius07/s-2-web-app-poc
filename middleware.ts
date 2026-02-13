@@ -8,27 +8,37 @@
  */
 
 export default function middleware(req: Request): Response {
-  // Get country from Vercel's geo headers
-  const country = (req as any).geo?.country || 'UNKNOWN';
-  
-  // Allowed countries (added ZA for demo purposes)
-  const allowedCountries = ['CA', 'US', 'ZA'];
-  
-  // Developer bypass via query parameter
+  // STEP 1: Check dev bypass FIRST (before any other logic)
+  // This must be the FIRST check - nothing should come before it
   const url = new URL(req.url);
   const bypassKey = url.searchParams.get('dev');
   
-  // Allow in development mode or with bypass key
-  if (process.env.NODE_ENV === 'development' || bypassKey === 'true') {
+  if (bypassKey === 'true') {
+    console.log('[Edge Geo] ✅ Dev bypass activated for:', url.pathname);
     return new Response(null, { status: 200 });
   }
   
-  // Check if country is allowed
+  // STEP 2: Get country from Vercel's geo headers
+  const country = (req as any).geo?.country || 'UNKNOWN';
+  
+  // STEP 3: Allowed countries (added ZA for demo purposes)
+  const allowedCountries = ['CA', 'US', 'ZA'];
+  
+  // STEP 4: Allow in development mode
+  if (process.env.NODE_ENV === 'development') {
+    console.log('[Edge Geo] ℹ️ Development mode - access allowed');
+    return new Response(null, { status: 200 });
+  }
+  
+  // STEP 5: Check if country is allowed
   if (allowedCountries.includes(country)) {
+    console.log('[Edge Geo] ✅ Access allowed for country:', country);
     return new Response(null, { status: 200 });
   }
   
-  // Block access - redirect to restricted page
+  // STEP 6: Block access - redirect to restricted page
+  console.log('[Edge Geo] ❌ Access blocked for country:', country);
+  console.log('[Edge Geo] 💡 Tip: Add ?dev=true to bypass for testing');
   return Response.redirect(new URL('/restricted', req.url), 302);
 }
 
