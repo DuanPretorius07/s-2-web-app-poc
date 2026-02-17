@@ -115,14 +115,33 @@ router.post('/login', validateBody(loginSchema), async (req, res) => {
     }
 
     // Sync to HubSpot asynchronously (non-blocking)
-    upsertContact({
+    // On Vercel, ensure the promise is tracked so it completes before function termination
+    const hubspotPromise = upsertContact({
       email: user.email,
       firstname: (user as any).firstname || (user as any).first_name || '',
       lastname: (user as any).lastname || (user as any).last_name || '',
       company: client?.name || undefined,
     }).catch((err) => {
       console.error('[Login] HubSpot upsert failed (non-blocking):', err);
+      // Log full error details
+      if (err instanceof Error) {
+        console.error('[Login] HubSpot error details:', {
+          message: err.message,
+          stack: err.stack,
+          name: err.name,
+        });
+      }
     });
+    
+    // On Vercel, track the promise to ensure it completes
+    // This doesn't block the response but ensures the function doesn't terminate early
+    if (process.env.VERCEL === '1') {
+      // Give HubSpot call time to complete (max 5 seconds)
+      Promise.race([
+        hubspotPromise,
+        new Promise(resolve => setTimeout(resolve, 5000)),
+      ]).catch(() => {});
+    }
 
     const token = generateToken({
       id: user.id,
@@ -541,14 +560,33 @@ router.post('/register', validateBody(registerSchema), async (req, res) => {
     const client = Array.isArray((user as any).clients) ? (user as any).clients[0] : (user as any).clients;
 
     // Sync to HubSpot asynchronously (non-blocking)
-    upsertContact({
+    // On Vercel, ensure the promise is tracked so it completes before function termination
+    const hubspotPromise = upsertContact({
       email: user.email,
       firstname: firstName,
       lastname: lastName,
       company: client?.name || clientName || undefined,
     }).catch((err) => {
       console.error('[Register] HubSpot upsert failed (non-blocking):', err);
+      // Log full error details
+      if (err instanceof Error) {
+        console.error('[Register] HubSpot error details:', {
+          message: err.message,
+          stack: err.stack,
+          name: err.name,
+        });
+      }
     });
+    
+    // On Vercel, track the promise to ensure it completes
+    // This doesn't block the response but ensures the function doesn't terminate early
+    if (process.env.VERCEL === '1') {
+      // Give HubSpot call time to complete (max 5 seconds)
+      Promise.race([
+        hubspotPromise,
+        new Promise(resolve => setTimeout(resolve, 5000)),
+      ]).catch(() => {});
+    }
 
     res.status(201).json({
       user: {

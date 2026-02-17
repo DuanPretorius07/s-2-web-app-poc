@@ -1066,8 +1066,19 @@ router.post('/rates', authenticateToken, validateBody(rateRequestSchema), async 
 
     // 3. HubSpot operations (completely non-blocking)
     if (dbUser) {
-      // eslint-disable-next-line @typescript-eslint/no-floating-promises
-      upsertHubSpotContactIfOptedIn(dbUser);
+      // On Vercel, ensure the promise is tracked so it completes before function termination
+      const contactPromise = upsertHubSpotContactIfOptedIn(dbUser).catch((err) => {
+        console.error('[RATES] HubSpot contact upsert error:', err);
+      });
+      
+      // On Vercel, track the promise to ensure it completes
+      if (process.env.VERCEL === '1') {
+        // Give HubSpot call time to complete (max 5 seconds)
+        Promise.race([
+          contactPromise,
+          new Promise(resolve => setTimeout(resolve, 5000)),
+        ]).catch(() => {});
+      }
     }
 
     // Wait for critical operations (token consumption) before responding
@@ -1117,8 +1128,19 @@ router.post('/rates', authenticateToken, validateBody(rateRequestSchema), async 
       const dealId = req.body.hubspotContext?.dealId || req.query.dealId as string | undefined;
       
       // Fire HubSpot note creation (non-blocking)
-      // eslint-disable-next-line @typescript-eslint/no-floating-promises
-      createHubSpotNote(dbUser.email, normalizedRates, requestPayload, dealId);
+      // On Vercel, ensure the promise is tracked so it completes before function termination
+      const notePromise = createHubSpotNote(dbUser.email, normalizedRates, requestPayload, dealId).catch((err) => {
+        console.error('[RATES] HubSpot note creation error:', err);
+      });
+      
+      // On Vercel, track the promise to ensure it completes
+      if (process.env.VERCEL === '1') {
+        // Give HubSpot call time to complete (max 5 seconds)
+        Promise.race([
+          notePromise,
+          new Promise(resolve => setTimeout(resolve, 5000)),
+        ]).catch(() => {});
+      }
     }
 
     // OPTIMIZATION: Don't wait for DB save - return response immediately
