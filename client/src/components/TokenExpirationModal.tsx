@@ -4,10 +4,9 @@ import { useAuth } from '../contexts/AuthContext';
 
 interface TokenExpirationModalProps {
   isOpen: boolean;
-  onClose: () => void;
 }
 
-export default function TokenExpirationModal({ isOpen, onClose }: TokenExpirationModalProps) {
+export default function TokenExpirationModal({ isOpen }: TokenExpirationModalProps) {
   const { logout, setTokenExpired } = useAuth();
   const navigate = useNavigate();
 

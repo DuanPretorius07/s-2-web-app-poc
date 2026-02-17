@@ -1,5 +1,4 @@
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
 
 interface User {
   id: string;
@@ -108,7 +107,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       });
 
       // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'AuthContext.tsx:login',message:'Login response received',data:{status:response.status,ok:response.ok,headersSent:response.headersSent},timestamp:Date.now()})}).catch(()=>{});
+      fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'AuthContext.tsx:login',message:'Login response received',data:{status:response.status,ok:response.ok},timestamp:Date.now()})}).catch(()=>{});
       // #endregion
 
       // Get response as text first to handle non-JSON responses

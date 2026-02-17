@@ -26,7 +26,7 @@ function AppRoutes() {
 
   return (
     <>
-      <TokenExpirationModal isOpen={tokenExpired} onClose={() => setTokenExpired(false)} />
+      <TokenExpirationModal isOpen={tokenExpired} />
       <Routes>
         <Route path="/login" element={user ? <Navigate to="/" /> : <Login />} />
         <Route
