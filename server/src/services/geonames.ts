@@ -338,8 +338,8 @@ export async function getPostalCodes(
                             pAdminName2.includes(normalizedPlaceName) ||
                             normalizedPlaceName.includes(pAdminName2) ||
                             // Also check if normalized names share significant words
-                            normalizedPlaceName.split(' ').some(word => word.length > 2 && pPlaceName.includes(word)) ||
-                            pPlaceName.split(' ').some(word => word.length > 2 && normalizedPlaceName.includes(word));
+                            normalizedPlaceName.split(' ').some((word: string) => word.length > 2 && pPlaceName.includes(word)) ||
+                            pPlaceName.split(' ').some((word: string) => word.length > 2 && normalizedPlaceName.includes(word));
             
             // #region agent log
             if (!nameMatch) {
