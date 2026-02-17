@@ -79,10 +79,14 @@ router.post('/login', validateBody(loginSchema), async (req, res) => {
 
     if (userError || !user) {
       console.log('[LOGIN] User not found or error', { userError: userError?.message, hasUser: !!user });
+      // Check if it's a "not found" error vs other database errors
+      const isNotFound = userError?.code === 'PGRST116' || !user;
       return res.status(401).json({
         requestId: crypto.randomUUID(),
         errorCode: 'INVALID_CREDENTIALS',
-        message: 'Invalid email or password',
+        message: isNotFound 
+          ? 'This email address is not registered. Please check your email or sign up for an account.'
+          : 'Invalid email or password',
       });
     }
 
@@ -91,7 +95,7 @@ router.post('/login', validateBody(loginSchema), async (req, res) => {
       return res.status(401).json({
         requestId: crypto.randomUUID(),
         errorCode: 'INVALID_CREDENTIALS',
-        message: 'Invalid email or password',
+        message: 'Incorrect password. Please try again or reset your password.',
       });
     }
 

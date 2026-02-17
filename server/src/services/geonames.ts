@@ -295,11 +295,19 @@ export async function getPostalCodes(
 
     console.log(`[GeoNames] Received ${data.postalCodes?.length || 0} postal codes from API`);
 
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'geonames.ts:getPostalCodes:beforeFilter',message:'Before filtering postal codes',data:{countryCode,adminCode1,placeName,rawPostalCodesCount:data.postalCodes?.length||0,samplePostalCodes:data.postalCodes?.slice(0,3).map((p:any)=>({postalCode:p.postalCode,placeName:p.placeName,adminCode1:p.adminCode1,adminName2:p.adminName2}))},timestamp:Date.now(),runId:'canada-postal-debug',hypothesisId:'H1,H2'})}).catch(()=>{});
+    // #endregion
+
     // Normalize place name for matching (remove common suffixes, handle variations)
     const normalizedPlaceName = placeName.trim().toLowerCase()
       .replace(/\s+/g, ' ') // Normalize whitespace
       .replace(/^st\.\s*/i, 'saint ') // Handle "St." prefix
       .replace(/^st\s+/i, 'saint '); // Handle "St " prefix
+
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'geonames.ts:getPostalCodes:normalized',message:'Place name normalized',data:{originalPlaceName:placeName,normalizedPlaceName,adminCode1},timestamp:Date.now(),runId:'canada-postal-debug',hypothesisId:'H3'})}).catch(()=>{});
+    // #endregion
 
     const postalCodes: string[] = (data.postalCodes || [])
       .filter((p: any) => {
@@ -307,15 +315,40 @@ export async function getPostalCodes(
         if (countryCode === 'CA') {
           // For Canada, check if adminCode1 matches (province/territory)
           const adminMatch = p.adminCode1 === adminCode1;
+          // #region agent log
+          if (!adminMatch) {
+            fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'geonames.ts:getPostalCodes:filterCA',message:'Canada postal code filtered out',data:{postalCode:p.postalCode,placeName:p.placeName,pAdminCode1:p.adminCode1,expectedAdminCode1:adminCode1,adminMatch},timestamp:Date.now(),runId:'canada-postal-debug',hypothesisId:'H4'})}).catch(()=>{});
+          }
+          // #endregion
           if (adminMatch) {
-            // Also check if placeName is similar (fuzzy match)
+            // For Canada, if adminCode1 matches, accept the postal code
+            // Only filter out if placeName is provided and doesn't match at all
             const pPlaceName = (p.placeName || '').toLowerCase().replace(/\s+/g, ' ');
             const pAdminName2 = (p.adminName2 || '').toLowerCase().replace(/\s+/g, ' ');
-            const nameMatch = pPlaceName.includes(normalizedPlaceName) || 
+            
+            // If placeName is empty in the result, accept it (common for Canada)
+            if (pPlaceName.length === 0) {
+              return true;
+            }
+            
+            // Try fuzzy matching - be very lenient
+            const nameMatch = pPlaceName === normalizedPlaceName ||
+                            pPlaceName.includes(normalizedPlaceName) || 
                             normalizedPlaceName.includes(pPlaceName) ||
                             pAdminName2.includes(normalizedPlaceName) ||
-                            normalizedPlaceName.includes(pAdminName2);
-            return adminMatch && (nameMatch || pPlaceName.length === 0);
+                            normalizedPlaceName.includes(pAdminName2) ||
+                            // Also check if normalized names share significant words
+                            normalizedPlaceName.split(' ').some(word => word.length > 2 && pPlaceName.includes(word)) ||
+                            pPlaceName.split(' ').some(word => word.length > 2 && normalizedPlaceName.includes(word));
+            
+            // #region agent log
+            if (!nameMatch) {
+              fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'geonames.ts:getPostalCodes:filterCAName',message:'Canada postal code filtered by name',data:{postalCode:p.postalCode,pPlaceName,normalizedPlaceName,pAdminName2,nameMatch},timestamp:Date.now(),runId:'canada-postal-debug',hypothesisId:'H3'})}).catch(()=>{});
+            }
+            // #endregion
+            
+            // Accept if admin matches and (name matches OR placeName was empty in search)
+            return nameMatch;
           }
           return false;
         }
@@ -338,11 +371,24 @@ export async function getPostalCodes(
         
         return adminMatch && (exactMatch || partialMatch);
       })
-      .map((p: any) => String(p.postalCode || ''))
+      .map((p: any) => {
+        // Normalize postal codes: preserve spaces for Canadian format (e.g., "R0K 0B8")
+        // but ensure consistent formatting
+        let code = String(p.postalCode || '').trim();
+        // For Canada, ensure space is in the middle if missing (format: A1A 1A1)
+        if (countryCode === 'CA' && code.length === 6 && !code.includes(' ')) {
+          code = `${code.slice(0, 3)} ${code.slice(3)}`;
+        }
+        return code;
+      })
       .filter((code: string) => code && code.trim() !== '');
 
     // Remove duplicates and sort
     const uniqueCodes = [...new Set(postalCodes)].sort();
+    
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'geonames.ts:getPostalCodes:afterFilter',message:'After filtering postal codes',data:{countryCode,adminCode1,placeName,filteredCount:postalCodes.length,uniqueCount:uniqueCodes.length,uniqueCodes:uniqueCodes.slice(0,5)},timestamp:Date.now(),runId:'canada-postal-debug',hypothesisId:'H2,H3,H4'})}).catch(()=>{});
+    // #endregion
     
     console.log(`[GeoNames] Filtered to ${uniqueCodes.length} unique postal codes`);
     

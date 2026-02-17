@@ -253,11 +253,15 @@ export default function QuoteForm() {
       const payload = {
         originCity: formData.origin.city.trim(),
         originState: formData.origin.state.trim(),
-        originZipcode: formData.origin.zipCode.trim(),
+        originZipcode: formData.origin.country === 'CA' 
+          ? formData.origin.zipCode.replace(/\s/g, '').trim() // Remove spaces for Canadian postal codes in API
+          : formData.origin.zipCode.trim(),
         originCountry: formData.origin.country || 'US',
         destinationCity: formData.destination.city.trim(),
         destinationState: formData.destination.state.trim(),
-        destinationZipcode: formData.destination.zipCode.trim(),
+        destinationZipcode: formData.destination.country === 'CA'
+          ? formData.destination.zipCode.replace(/\s/g, '').trim() // Remove spaces for Canadian postal codes in API
+          : formData.destination.zipCode.trim(),
         destinationCountry: formData.destination.country || 'US',
         UOM: 'US',
         pickupDate: formData.pickupDate,
@@ -446,11 +450,15 @@ export default function QuoteForm() {
       const requestPayload = {
         originCity: formData.origin.city.trim(),
         originState: formData.origin.state.trim(),
-        originZipcode: formData.origin.zipCode.trim(),
+        originZipcode: formData.origin.country === 'CA' 
+          ? formData.origin.zipCode.replace(/\s/g, '').trim() // Remove spaces for Canadian postal codes in API
+          : formData.origin.zipCode.trim(),
         originCountry: formData.origin.country || 'US',
         destinationCity: formData.destination.city.trim(),
         destinationState: formData.destination.state.trim(),
-        destinationZipcode: formData.destination.zipCode.trim(),
+        destinationZipcode: formData.destination.country === 'CA'
+          ? formData.destination.zipCode.replace(/\s/g, '').trim() // Remove spaces for Canadian postal codes in API
+          : formData.destination.zipCode.trim(),
         destinationCountry: formData.destination.country || 'US',
         UOM: 'US',
         pickupDate: formData.pickupDate,

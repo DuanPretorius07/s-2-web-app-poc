@@ -180,9 +180,26 @@ export default function LocationSelector({
   };
 
   const handleManualZipChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    let zipValue = e.target.value;
+    
+    // For Canada, allow spaces in postal codes (format: A1A 1A1)
+    // Auto-format Canadian postal codes as user types
+    if (value.country === 'CA') {
+      // Remove all spaces first, then add space after 3rd character if length > 3
+      const cleaned = zipValue.replace(/\s/g, '').toUpperCase();
+      if (cleaned.length > 3) {
+        zipValue = `${cleaned.slice(0, 3)} ${cleaned.slice(3, 6)}`;
+      } else {
+        zipValue = cleaned;
+      }
+    } else {
+      // For US, remove spaces (ZIP codes are 5 or 9 digits)
+      zipValue = zipValue.replace(/\s/g, '');
+    }
+    
     onChange({
       ...value,
-      zipCode: e.target.value,
+      zipCode: zipValue,
     });
   };
 
@@ -352,10 +369,11 @@ export default function LocationSelector({
                 type="text"
                 value={value.zipCode}
                 onChange={handleManualZipChange}
+                maxLength={value.country === 'CA' ? 7 : 10} // Canadian: "A1A 1A1" (7 chars), US: "12345" or "12345-6789" (10 chars)
                 className={`w-full border rounded px-3 py-2 ${
                   errors.zipCode ? 'border-red-500' : 'border-gray-300'
                 } focus:border-blue-500 focus:ring-1 focus:ring-blue-500`}
-                placeholder="Enter ZIP/postal code"
+                placeholder={value.country === 'CA' ? 'Enter postal code (e.g., R0K 0B8)' : 'Enter ZIP code'}
               />
               {postalCodes.length > 0 && (
                 <button
@@ -421,10 +439,15 @@ export default function LocationSelector({
                 type="text"
                 value={value.zipCode}
                 onChange={handleManualZipChange}
+                maxLength={value.country === 'CA' ? 7 : 10} // Canadian: "A1A 1A1" (7 chars), US: "12345" or "12345-6789" (10 chars)
                 className={`w-full border rounded px-3 py-2 ${
                   errors.zipCode ? 'border-red-500' : 'border-gray-300'
                 } focus:border-blue-500 focus:ring-1 focus:ring-blue-500`}
-                placeholder={loadingPostalCodes ? 'Loading...' : 'Enter ZIP code'}
+                placeholder={loadingPostalCodes 
+                  ? 'Loading...' 
+                  : value.country === 'CA' 
+                    ? 'Enter postal code (e.g., R0K 0B8)' 
+                    : 'Enter ZIP code'}
                 disabled={loadingPostalCodes}
               />
             </div>

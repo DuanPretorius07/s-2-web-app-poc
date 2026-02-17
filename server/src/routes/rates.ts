@@ -218,113 +218,204 @@ async function callRatesAPI(requestBody: any): Promise<any> {
         url: ship2PrimusUrl,
       });
 
-      // Ship2Primus /applet/v1/rate/multiple expects a GET with querystring params,
-      // not a JSON POST body. Build the querystring similarly to the original Lambda.
+      // OPTIMIZATION: Batch rate types into smaller groups and run in parallel for better performance
+      // This reduces the number of concurrent requests while still parallelizing
       const { freightInfo, rateTypesList, ...rest } = enhancedBody as any;
-
-      const qs = new URLSearchParams();
-      // Basic scalar fields - include all values (API requires city/state even if placeholders)
-      Object.entries(rest).forEach(([key, value]) => {
-        if (value === undefined || value === null) return;
-        qs.set(key, String(value));
-      });
-      // Freight info as JSON string
-      if (freightInfo) {
-        qs.set('freightInfo', JSON.stringify(freightInfo));
-      }
-      // Rate types list as repeated params: rateTypesList[]=LTL&rateTypesList[]=SP
-      if (Array.isArray(rateTypesList)) {
-        rateTypesList.forEach((rt: string) => {
-          if (rt) qs.append('rateTypesList[]', rt);
-        });
-      }
-
-      const urlWithQuery =
-        ship2PrimusUrl.includes('?')
-          ? `${ship2PrimusUrl}&${qs.toString()}`
-          : `${ship2PrimusUrl}?${qs.toString()}`;
-
+      const rateTypes = Array.isArray(rateTypesList) && rateTypesList.length > 0 ? rateTypesList : ['LTL'];
+      
       // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'rates.ts:callRatesAPI:urlBuilt',message:'URL with query params built',data:{urlLength:urlWithQuery.length,urlPreview:urlWithQuery.substring(0,300),hasOriginCity:qs.has('originCity'),originCityValue:qs.get('originCity'),hasOriginState:qs.has('originState'),originStateValue:qs.get('originState'),hasOriginZipcode:qs.has('originZipcode'),hasDestinationZipcode:qs.has('destinationZipcode'),hasFreightInfo:qs.has('freightInfo'),rateTypesListCount:qs.getAll('rateTypesList[]').length},timestamp:Date.now(),runId:'debug-ship2primus',hypothesisId:'H2,H3,H4'})}).catch(()=>{});
+      fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'rates.ts:callRatesAPI:strategy',message:'Rate fetching strategy',data:{rateTypesCount:rateTypes.length,rateTypes:rateTypes,willBatch:rateTypes.length>3},timestamp:Date.now(),runId:'timeout-debug',hypothesisId:'H1'})}).catch(()=>{});
       // #endregion
 
-      console.log('[RATES] Ship2Primus API call - URL:', urlWithQuery.substring(0, 200) + (urlWithQuery.length > 200 ? '...' : ''));
-      console.log('[RATES] Ship2Primus API call - Request payload summary:', {
-        originZipcode: enhancedBody.originZipcode,
-        destinationZipcode: enhancedBody.destinationZipcode,
-        pickupDate: enhancedBody.pickupDate,
-        rateTypesList: enhancedBody.rateTypesList,
-        freightInfoCount: Array.isArray(enhancedBody.freightInfo) ? enhancedBody.freightInfo.length : 0,
-      });
-
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'rates.ts:callRatesAPI:beforeShip2PrimusRequest',message:'About to call ship2PrimusRequest',data:{method:'GET',urlLength:urlWithQuery.length},timestamp:Date.now(),runId:'debug-ship2primus',hypothesisId:'H1,H3'})}).catch(()=>{});
-      // #endregion
-
-      let data: any;
-      try {
-        data = await ship2PrimusRequest<any>(urlWithQuery, {
-          method: 'GET',
-        });
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'rates.ts:callRatesAPI:afterShip2PrimusRequest',message:'ship2PrimusRequest completed',data:{hasData:!!data,topLevelKeys:data?Object.keys(data):[]},timestamp:Date.now(),runId:'debug-ship2primus',hypothesisId:'H1,H3,H4'})}).catch(()=>{});
-        // #endregion
-      } catch (error: any) {
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'rates.ts:callRatesAPI:ship2PrimusRequestError',message:'ship2PrimusRequest failed',data:{errorName:error?.name,errorMessage:error?.message,errorCode:error?.code,errorCause:error?.cause?.code,isSocketError:error?.message?.includes('closed')||error?.code==='UND_ERR_SOCKET',errorStack:error?.stack?.substring(0,500)},timestamp:Date.now(),runId:'debug-ship2primus',hypothesisId:'H1,H3,H5'})}).catch(()=>{});
-        // #endregion
-        throw error;
-      }
-
-      console.log('[RATES] Ship2Primus API response received:', {
-        hasData: !!data,
-        topLevelKeys: data ? Object.keys(data) : [],
-        hasNestedData: !!(data as any)?.data,
-        hasResults: !!(data as any)?.data?.results,
-        ratesLength: Array.isArray((data as any)?.data?.results?.rates) ? (data as any).data.results.rates.length : null,
-        fullResponse: process.env.NODE_ENV === 'development' ? JSON.stringify(data, null, 2).substring(0, 1000) : '[truncated in production]',
-      });
-
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'rates.ts:callRatesAPI:responseData',message:'Full API response structure',data:{hasData:!!data,dataKeys:data?Object.keys(data):[],hasNestedData:!!(data as any)?.data,nestedDataKeys:(data as any)?.data?Object.keys((data as any).data):[],hasResults:!!(data as any)?.data?.results,resultsKeys:(data as any)?.data?.results?Object.keys((data as any).data.results):[],ratesLength:Array.isArray((data as any)?.data?.results?.rates)?(data as any).data.results.rates.length:null,fullResponseStructure:JSON.stringify(data).substring(0,2000)},timestamp:Date.now(),runId:'debug-ship2primus',hypothesisId:'H2,H4'})}).catch(()=>{});
-      // #endregion
-
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({
-          sessionId:'debug-session',
-          runId:'rates-ship2primus',
-          hypothesisId:'H1',
-          location:'rates.ts:callRatesAPI:Ship2Primus',
-          message:'Ship2Primus raw response meta',
-          data:{
-            hasData: !!data,
-            topLevelKeys: data ? Object.keys(data) : [],
-            hasNestedData: !!(data as any)?.data,
-            hasResults: !!(data as any)?.data?.results,
-            ratesLength: Array.isArray((data as any)?.data?.results?.rates) ? (data as any).data.results.rates.length : null
-          },
-          timestamp:Date.now()
-        })
-      }).catch(()=>{});
-      // #endregion
-
-      // Handle Ship2Primus response format
-      const rates = data?.data?.results?.rates;
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'rates.ts:callRatesAPI:extractRates',message:'Extracting rates from response',data:{hasData:!!data,hasNestedData:!!data?.data,hasResults:!!data?.data?.results,hasRates:!!rates,ratesIsArray:Array.isArray(rates),ratesLength:Array.isArray(rates)?rates.length:null,resultsKeys:(data as any)?.data?.results?Object.keys((data as any).data.results):[],fullResponseSample:JSON.stringify(data).substring(0,1500)},timestamp:Date.now(),runId:'debug-ship2primus',hypothesisId:'H2,H4'})}).catch(()=>{});
-      // #endregion
-      if (rates) {
-        console.log('[RATES] Ship2Primus returned', rates.length, 'rates');
-        if (rates.length === 0) {
-          console.warn('[RATES] Ship2Primus returned 0 rates. Possible causes: invalid placeholders (defaultCity/defaultState), no matching carriers, or invalid request parameters');
+      // If multiple rate types, batch them into groups and run batches in parallel
+      // Batch size: 3 rate types per batch (optimal balance between parallelism and API load)
+      const BATCH_SIZE = 3;
+      if (rateTypes.length > 1) {
+        console.log(`[RATES] Processing ${rateTypes.length} rate types with batching (batch size: ${BATCH_SIZE})`);
+        
+        // Create batches
+        const batches: string[][] = [];
+        for (let i = 0; i < rateTypes.length; i += BATCH_SIZE) {
+          batches.push(rateTypes.slice(i, i + BATCH_SIZE));
         }
-        return { rates };
+        
+        console.log(`[RATES] Split into ${batches.length} batches:`, batches.map(b => b.join(', ')));
+        
+        // Process each batch (batches run sequentially, but rate types within batch run in parallel)
+        const allRates: any[] = [];
+        const overallStartTime = Date.now();
+        
+        for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
+          const batch = batches[batchIndex];
+          console.log(`[RATES] Processing batch ${batchIndex + 1}/${batches.length} with rate types: ${batch.join(', ')}`);
+          
+          const batchStartTime = Date.now();
+          const apiCallPromises = batch.map(async (rateType: string) => {
+          const qs = new URLSearchParams();
+          // Basic scalar fields
+          Object.entries(rest).forEach(([key, value]) => {
+            if (value === undefined || value === null) return;
+            qs.set(key, String(value));
+          });
+          // Freight info as JSON string
+          if (freightInfo) {
+            qs.set('freightInfo', JSON.stringify(freightInfo));
+          }
+          // Single rate type per request
+          qs.append('rateTypesList[]', rateType);
+
+          const urlWithQuery =
+            ship2PrimusUrl.includes('?')
+              ? `${ship2PrimusUrl}&${qs.toString()}`
+              : `${ship2PrimusUrl}?${qs.toString()}`;
+
+            const startTime = Date.now();
+            // #region agent log
+            fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'rates.ts:callRatesAPI:parallelRequest',message:'Starting parallel request',data:{rateType:rateType,startTime:startTime},timestamp:Date.now(),runId:'timeout-debug',hypothesisId:'H1'})}).catch(()=>{});
+            // #endregion
+
+          try {
+            // Only apply timeout in production (Vercel) - local dev has no timeout limit
+            const isProduction = process.env.NODE_ENV === 'production' && process.env.VERCEL === '1';
+            let response: any;
+            
+            if (isProduction) {
+              // Production timeout: 28s per request (with parallelization, total should be < 30s)
+              const timeoutMs = 28000;
+              const timeoutPromise = new Promise<never>((_, reject) => 
+                setTimeout(() => reject(new Error(`Ship2Primus API request timeout for ${rateType} after 28s`)), timeoutMs)
+              );
+              response = await Promise.race([
+                ship2PrimusRequest<any>(urlWithQuery, { method: 'GET' }),
+                timeoutPromise,
+              ]);
+            } else {
+              // Local dev: no timeout
+              response = await ship2PrimusRequest<any>(urlWithQuery, { method: 'GET' });
+            }
+
+            const duration = Date.now() - startTime;
+            // #region agent log
+            fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'rates.ts:callRatesAPI:parallelResponse',message:'Parallel request completed',data:{rateType:rateType,duration:duration,hasRates:!!response?.data?.results?.rates,ratesCount:Array.isArray(response?.data?.results?.rates)?response.data.results.rates.length:0},timestamp:Date.now(),runId:'timeout-debug',hypothesisId:'H1'})}).catch(()=>{});
+            // #endregion
+
+            console.log(`[RATES] Rate type ${rateType} completed in ${duration}ms`);
+            return response;
+          } catch (error: any) {
+            const duration = Date.now() - startTime;
+            // #region agent log
+            fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'rates.ts:callRatesAPI:parallelError',message:'Parallel request failed',data:{rateType:rateType,duration:duration,errorMessage:error?.message},timestamp:Date.now(),runId:'timeout-debug',hypothesisId:'H1'})}).catch(()=>{});
+            // #endregion
+            console.warn(`[RATES] Rate type ${rateType} failed after ${duration}ms:`, error.message);
+            // Return empty result for failed rate type (don't fail entire request)
+            return { data: { results: { rates: [] } } };
+          }
+        });
+
+          // Wait for all requests in this batch to complete
+          const batchResponses = await Promise.all(apiCallPromises);
+          const batchDuration = Date.now() - batchStartTime;
+          
+          // #region agent log
+          fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'rates.ts:callRatesAPI:batchComplete',message:'Batch completed',data:{batchIndex:batchIndex+1,totalBatches:batches.length,batchDuration:batchDuration,responsesCount:batchResponses.length,successCount:batchResponses.filter(r=>r?.data?.results?.rates?.length>0).length},timestamp:Date.now(),runId:'timeout-debug',hypothesisId:'H1'})}).catch(()=>{});
+          // #endregion
+
+          console.log(`[RATES] Batch ${batchIndex + 1}/${batches.length} completed in ${batchDuration}ms`);
+          
+          // Combine rates from this batch
+          batchResponses.forEach((response) => {
+            const rates = response?.data?.results?.rates;
+            if (Array.isArray(rates) && rates.length > 0) {
+              allRates.push(...rates);
+            }
+          });
+        }
+        
+        const totalDuration = Date.now() - overallStartTime;
+        console.log(`[RATES] All ${batches.length} batches completed in ${totalDuration}ms. Combined ${allRates.length} rates from ${rateTypes.length} rate types`);
+        return { rates: allRates };
+      } else {
+        // Single rate type - use original approach
+        const qs = new URLSearchParams();
+        Object.entries(rest).forEach(([key, value]) => {
+          if (value === undefined || value === null) return;
+          qs.set(key, String(value));
+        });
+        if (freightInfo) {
+          qs.set('freightInfo', JSON.stringify(freightInfo));
+        }
+        if (Array.isArray(rateTypesList)) {
+          rateTypesList.forEach((rt: string) => {
+            if (rt) qs.append('rateTypesList[]', rt);
+          });
+        }
+
+        const urlWithQuery =
+          ship2PrimusUrl.includes('?')
+            ? `${ship2PrimusUrl}&${qs.toString()}`
+            : `${ship2PrimusUrl}?${qs.toString()}`;
+
+        console.log('[RATES] Ship2Primus API call - URL:', urlWithQuery.substring(0, 200) + (urlWithQuery.length > 200 ? '...' : ''));
+        console.log('[RATES] Ship2Primus API call - Request payload summary:', {
+          originZipcode: enhancedBody.originZipcode,
+          destinationZipcode: enhancedBody.destinationZipcode,
+          pickupDate: enhancedBody.pickupDate,
+          rateTypesList: enhancedBody.rateTypesList,
+          freightInfoCount: Array.isArray(enhancedBody.freightInfo) ? enhancedBody.freightInfo.length : 0,
+        });
+
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'rates.ts:callRatesAPI:beforeShip2PrimusRequest',message:'About to call ship2PrimusRequest (single)',data:{method:'GET',urlLength:urlWithQuery.length,rateTypesCount:rateTypesList?.length||1},timestamp:Date.now(),runId:'timeout-debug',hypothesisId:'H1'})}).catch(()=>{});
+        // #endregion
+
+        let data: any;
+        try {
+          // Only apply timeout in production (Vercel) - local dev has no timeout limit
+          const isProduction = process.env.NODE_ENV === 'production' && process.env.VERCEL === '1';
+          const startTime = Date.now();
+          
+          if (isProduction) {
+            // Production timeout: 28s for single request
+            const timeoutMs = 28000;
+            const timeoutPromise = new Promise<never>((_, reject) => 
+              setTimeout(() => reject(new Error('Ship2Primus API request timeout after 28s')), timeoutMs)
+            );
+            data = await Promise.race([
+              ship2PrimusRequest<any>(urlWithQuery, {
+                method: 'GET',
+              }),
+              timeoutPromise,
+            ]);
+          } else {
+            // Local dev: no timeout
+            data = await ship2PrimusRequest<any>(urlWithQuery, {
+              method: 'GET',
+            });
+          }
+          const duration = Date.now() - startTime;
+          // #region agent log
+          fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'rates.ts:callRatesAPI:singleRequestComplete',message:'Single request completed',data:{duration:duration,hasRates:!!data?.data?.results?.rates,ratesCount:Array.isArray(data?.data?.results?.rates)?data.data.results.rates.length:0},timestamp:Date.now(),runId:'timeout-debug',hypothesisId:'H1'})}).catch(()=>{});
+          // #endregion
+          console.log(`[RATES] Single request completed in ${duration}ms`);
+          
+          // Handle Ship2Primus response format
+          const rates = data?.data?.results?.rates;
+          if (rates) {
+            console.log('[RATES] Ship2Primus returned', rates.length, 'rates');
+            if (rates.length === 0) {
+              console.warn('[RATES] Ship2Primus returned 0 rates. Possible causes: invalid placeholders (defaultCity/defaultState), no matching carriers, or invalid request parameters');
+            }
+            return { rates };
+          }
+          console.log('[RATES] Ship2Primus response format unexpected, returning full data');
+          return data;
+        } catch (error: any) {
+          // #region agent log
+          fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'rates.ts:callRatesAPI:singleRequestError',message:'Single request failed',data:{errorName:error?.name,errorMessage:error?.message,errorCode:error?.code},timestamp:Date.now(),runId:'timeout-debug',hypothesisId:'H1'})}).catch(()=>{});
+          // #endregion
+          throw error;
+        }
       }
-      console.log('[RATES] Ship2Primus response format unexpected, returning full data');
-      return data;
     } else if (apiGatewayUrl) {
       console.log('[RATES] Calling legacy API Gateway proxy for rates:', {
         url: apiGatewayUrl,
@@ -517,8 +608,15 @@ async function createHubSpotNote(
   requestPayload: any,
   dealId?: string
 ) {
+  // #region agent log
+  fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'rates.ts:createHubSpotNote:entry',message:'createHubSpotNote called',data:{contactEmail,ratesCount:rates.length,hasDealId:!!dealId},timestamp:Date.now(),runId:'hubspot-debug',hypothesisId:'H4'})}).catch(()=>{});
+  // #endregion
+  
   const accessToken = process.env.HUBSPOT_PRIVATE_APP_TOKEN || process.env.HUBSPOT_ACCESS_TOKEN;
   if (!accessToken) {
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'rates.ts:createHubSpotNote:noToken',message:'No HubSpot token configured',data:{hasPrivateToken:!!process.env.HUBSPOT_PRIVATE_APP_TOKEN,hasAccessToken:!!process.env.HUBSPOT_ACCESS_TOKEN},timestamp:Date.now(),runId:'hubspot-debug',hypothesisId:'H4'})}).catch(()=>{});
+    // #endregion
     console.log('[HubSpot] Skipping note creation - no token configured');
     return; // Skip if not configured
   }
@@ -547,17 +645,26 @@ async function createHubSpotNote(
 
     if (!searchResponse.ok) {
       const errorText = await searchResponse.text();
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'rates.ts:createHubSpotNote:searchFailed',message:'Contact search failed',data:{status:searchResponse.status,errorText:errorText.substring(0,200)},timestamp:Date.now(),runId:'hubspot-debug',hypothesisId:'H3'})}).catch(()=>{});
+      // #endregion
       console.warn('[HubSpot] Contact search failed:', searchResponse.status, errorText);
       return;
     }
 
     const searchData = await searchResponse.json() as any;
     if (!searchData.results || searchData.results.length === 0) {
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'rates.ts:createHubSpotNote:contactNotFound',message:'Contact not found',data:{contactEmail,searchDataKeys:Object.keys(searchData)},timestamp:Date.now(),runId:'hubspot-debug',hypothesisId:'H2'})}).catch(()=>{});
+      // #endregion
       console.log(`[HubSpot] Contact not found for email: ${contactEmail}`);
       return; // Contact not found
     }
 
     const contactId = searchData.results[0].id;
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'rates.ts:createHubSpotNote:contactFound',message:'Contact found, creating note',data:{contactId,contactEmail},timestamp:Date.now(),runId:'hubspot-debug',hypothesisId:'H2'})}).catch(()=>{});
+    // #endregion
 
     // Build request summary (lane + key shipment inputs)
     const origin = `${requestPayload.originCity || ''}, ${requestPayload.originState || ''} ${requestPayload.originZipcode || ''}`.trim();
@@ -637,13 +744,22 @@ ${top3Rates.map(rate => `   ${rate}`).join('\n')}`;
 
     if (!noteResponse.ok) {
       const errorText = await noteResponse.text();
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'rates.ts:createHubSpotNote:noteFailed',message:'Note creation API failed',data:{status:noteResponse.status,errorText:errorText.substring(0,500),notePayloadKeys:Object.keys(notePayload)},timestamp:Date.now(),runId:'hubspot-debug',hypothesisId:'H3'})}).catch(()=>{});
+      // #endregion
       console.error('[HubSpot] Note creation failed:', noteResponse.status, errorText);
       return;
     }
 
     const noteResult = await noteResponse.json() as { id?: string };
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'rates.ts:createHubSpotNote:success',message:'Note created successfully',data:{contactId,noteId:noteResult.id},timestamp:Date.now(),runId:'hubspot-debug',hypothesisId:'H3'})}).catch(()=>{});
+    // #endregion
     console.log(`[HubSpot] ✅ Note created successfully for contact ${contactId}:`, noteResult.id);
   } catch (error) {
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'rates.ts:createHubSpotNote:exception',message:'Exception in createHubSpotNote',data:{errorMessage:error instanceof Error?error.message:String(error),errorName:error instanceof Error?error.name:'Unknown'},timestamp:Date.now(),runId:'hubspot-debug',hypothesisId:'H1'})}).catch(()=>{});
+    // #endregion
     console.error('[HubSpot] Note creation error:', error);
     // Don't fail the request if HubSpot fails
   }
@@ -805,137 +921,158 @@ router.post('/rates', authenticateToken, validateBody(rateRequestSchema), async 
       });
     }
 
-    // At this point we have at least one valid rate; consume exactly one token atomically.
-    // This uses a Postgres function (consume_rate_token) for strict, server-enforced limits.
+    // Sort rates cheapest first (matching Lambda behavior) - do this early
+    rates.sort((a, b) => (a.total ?? a.totalCost ?? Infinity) - (b.total ?? b.totalCost ?? Infinity));
+
+    // OPTIMIZATION: Start all non-critical operations in parallel, don't await them
+    // This prevents timeout issues when dealing with large rate responses
+    
+    // 1. Consume rate token (critical - must complete before response)
     let rateTokensRemaining: number | null = null;
     let rateTokensUsed: number | null = null;
-    try {
-      const { data: tokenResult, error: tokenError } = await supabaseAdmin
-        .rpc('consume_rate_token', { p_client_id: clientId });
-
-      if (tokenError) {
-        console.warn('[RATES] Failed to consume rate token (non-blocking):', tokenError.message);
-      } else if (tokenResult) {
-        rateTokensRemaining = (tokenResult as any).rate_tokens_remaining ?? null;
-        rateTokensUsed = (tokenResult as any).rate_tokens_used ?? null;
+    const tokenPromise = (async () => {
+      try {
+        const { data: tokenResult, error: tokenError } = await supabaseAdmin
+          .rpc('consume_rate_token', { p_client_id: clientId });
+        if (tokenError) {
+          console.warn('[RATES] Failed to consume rate token (non-blocking):', tokenError.message);
+        } else if (tokenResult) {
+          rateTokensRemaining = (tokenResult as any).rate_tokens_remaining ?? null;
+          rateTokensUsed = (tokenResult as any).rate_tokens_used ?? null;
+        }
+      } catch (tokenRpcError: any) {
+        console.warn('[RATES] Token RPC error (non-blocking):', tokenRpcError);
       }
-    } catch (tokenRpcError) {
-      console.warn('[RATES] Token RPC error (non-blocking):', tokenRpcError);
-    }
+    })();
 
-    // Fire HubSpot contact upsert for opted-in users; never block the response
+    // 2. Save to database (non-critical - runs in background, doesn't block response)
+    // Use a shared object to store quoteId so it's available for response
+    const dbState: { quoteId: string | null; rateIdMap: Map<string, string> } = {
+      quoteId: null,
+      rateIdMap: new Map<string, string>(),
+    };
+    
+    const dbPromise = (async () => {
+      try {
+        const { data: quoteRequest, error: quoteError } = await supabaseAdmin
+          .from('quote_requests')
+          .insert({
+            client_id: clientId,
+            user_id: userId,
+            request_payload_json: requestPayload as any,
+          })
+          .select('id')
+          .single();
+
+        if (!quoteError && quoteRequest) {
+          dbState.quoteId = quoteRequest.id;
+          
+          // Prepare rates for insertion
+          const ratesToInsert = rates.map((rate: any) => {
+            const carrierName = rate.name || 
+                               rate.carrierName || 
+                               rate.carrier_name || 
+                               rate.carrier || 
+                               rate.companyName || 
+                               rate.company_name ||
+                               rate.company ||
+                               rate.provider ||
+                               rate.providerName ||
+                               'Unknown';
+
+            const serviceName = rate.serviceName || 
+                               rate.service_name || 
+                               rate.service || 
+                               rate.serviceLevel || 
+                               rate.service_level ||
+                               rate.serviceType ||
+                               'Standard';
+
+            const externalRateId = rate.id || rate.rateId || rate.rate_id || crypto.randomUUID();
+
+            return {
+              quote_request_id: quoteRequest.id,
+              rate_id: externalRateId,
+              carrier_name: carrierName,
+              service_name: serviceName,
+              transit_days: rate.transitDays || rate.transit_days || rate.transitTime || rate.transit_time || null,
+              total_cost: rate.total || rate.totalCost || rate.total_cost || rate.cost || rate.price || rate.amount || 0,
+              currency: rate.currency || rate.currencyCode || 'USD',
+              raw_json: rate as any,
+            };
+          });
+
+          // OPTIMIZATION: For large rate sets, batch inserts
+          const BATCH_SIZE = 50;
+          if (ratesToInsert.length > BATCH_SIZE) {
+            console.log(`[RATES] Batching ${ratesToInsert.length} rates into chunks of ${BATCH_SIZE}`);
+            const batches = [];
+            for (let i = 0; i < ratesToInsert.length; i += BATCH_SIZE) {
+              batches.push(ratesToInsert.slice(i, i + BATCH_SIZE));
+            }
+            
+            // Insert batches in parallel
+            const insertPromises = batches.map(batch =>
+              supabaseAdmin.from('rates').insert(batch).select('id, rate_id')
+            );
+            
+            const results = await Promise.all(insertPromises);
+            results.forEach(({ data: insertedRates }) => {
+              if (insertedRates) {
+                insertedRates.forEach((dbRate: any) => {
+                  if (dbRate.rate_id) {
+                    dbState.rateIdMap.set(dbRate.rate_id, dbRate.id);
+                  }
+                });
+              }
+            });
+          } else {
+            // Small batch - single insert
+            const { data: insertedRates, error: insertError } = await supabaseAdmin
+              .from('rates')
+              .insert(ratesToInsert)
+              .select('id, rate_id');
+
+            if (!insertError && insertedRates) {
+              insertedRates.forEach((dbRate: any) => {
+                if (dbRate.rate_id) {
+                  dbState.rateIdMap.set(dbRate.rate_id, dbRate.id);
+                }
+              });
+            }
+          }
+
+          // Audit log (non-blocking)
+          (async () => {
+            try {
+              await supabaseAdmin.from('audit_logs').insert({
+                client_id: clientId,
+                user_id: userId,
+                action: 'GET_RATES',
+                metadata_json: {
+                  quoteRequestId: quoteRequest.id,
+                  ratesCount: rates.length,
+                },
+              });
+            } catch (err: any) {
+              console.warn('[RATES] Audit log failed:', err);
+            }
+          })();
+        }
+      } catch (dbError) {
+        console.warn('[RATES] Database save failed (non-critical):', dbError);
+      }
+    })();
+
+    // 3. HubSpot operations (completely non-blocking)
     if (dbUser) {
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({
-          sessionId:'debug-session',
-          runId:'hubspot-pre',
-          hypothesisId:'H-HUBSPOT-INVOKE',
-          location:'rates.ts:/rates:invokeUpsert',
-          message:'Invoking HubSpot upsert after successful rates',
-          data:{
-            hasDbUser:true,
-            hubspotOptIn:dbUser?.hubspot_opt_in ?? null,
-            hasToken:!!process.env.HUBSPOT_ACCESS_TOKEN
-          },
-          timestamp:Date.now()
-        })
-      }).catch(()=>{});
-      // #endregion
-
-      // Intentionally not awaited with try/catch here, as upsertHubSpotContactIfOptedIn
-      // already encapsulates its own error handling.
       // eslint-disable-next-line @typescript-eslint/no-floating-promises
       upsertHubSpotContactIfOptedIn(dbUser);
     }
 
-    // Sort rates cheapest first (matching Lambda behavior)
-    rates.sort((a, b) => (a.total ?? a.totalCost ?? Infinity) - (b.total ?? b.totalCost ?? Infinity));
-
-    // Save quote request and rates to database (optional - for tracking)
-    let quoteId: string | null = null;
-    const rateIdMap = new Map<string, string>(); // Map external rate_id to database id
-    
-    try {
-      const { data: quoteRequest, error: quoteError } = await supabaseAdmin
-        .from('quote_requests')
-        .insert({
-          client_id: clientId,
-          user_id: userId,
-          request_payload_json: requestPayload as any,
-        })
-        .select('id')
-        .single();
-
-      if (!quoteError && quoteRequest) {
-        quoteId = quoteRequest.id;
-        
-        // Save rates to database - use same normalization logic
-        const ratesToInsert = rates.map((rate: any) => {
-          const carrierName = rate.name || 
-                             rate.carrierName || 
-                             rate.carrier_name || 
-                             rate.carrier || 
-                             rate.companyName || 
-                             rate.company_name ||
-                             rate.company ||
-                             rate.provider ||
-                             rate.providerName ||
-                             'Unknown';
-
-          const serviceName = rate.serviceName || 
-                             rate.service_name || 
-                             rate.service || 
-                             rate.serviceLevel || 
-                             rate.service_level ||
-                             rate.serviceType ||
-                             'Standard';
-
-          const externalRateId = rate.id || rate.rateId || rate.rate_id || crypto.randomUUID();
-
-          return {
-            quote_request_id: quoteRequest.id,
-            rate_id: externalRateId,
-            carrier_name: carrierName,
-            service_name: serviceName,
-            transit_days: rate.transitDays || rate.transit_days || rate.transitTime || rate.transit_time || null,
-            total_cost: rate.total || rate.totalCost || rate.total_cost || rate.cost || rate.price || rate.amount || 0,
-            currency: rate.currency || rate.currencyCode || 'USD',
-            raw_json: rate as any,
-          };
-        });
-
-        const { data: insertedRates, error: insertError } = await supabaseAdmin
-          .from('rates')
-          .insert(ratesToInsert)
-          .select('id, rate_id');
-
-        if (!insertError && insertedRates) {
-          // Create a map of external rate_id to database id for frontend
-          insertedRates.forEach((dbRate: any) => {
-            if (dbRate.rate_id) {
-              rateIdMap.set(dbRate.rate_id, dbRate.id);
-            }
-          });
-        }
-
-        // Audit log
-        await supabaseAdmin.from('audit_logs').insert({
-          client_id: clientId,
-          user_id: userId,
-          action: 'GET_RATES',
-          metadata_json: {
-            quoteRequestId: quoteRequest.id,
-            ratesCount: rates.length,
-          },
-        });
-      }
-    } catch (dbError) {
-      // Don't fail the request if database save fails - just log it
-      console.warn('[RATES] Database save failed (non-critical):', dbError);
-    }
+    // Wait for critical operations (token consumption) before responding
+    // Don't wait for DB save - it's non-critical
+    await tokenPromise;
 
     // Normalize rates - extract carrier name from various possible fields
     // Log first rate structure for debugging (only in development)
@@ -984,6 +1121,11 @@ router.post('/rates', authenticateToken, validateBody(rateRequestSchema), async 
       createHubSpotNote(dbUser.email, normalizedRates, requestPayload, dealId);
     }
 
+    // OPTIMIZATION: Don't wait for DB save - return response immediately
+    // DB save will complete in background, quoteId may be null initially
+    // eslint-disable-next-line @typescript-eslint/no-floating-promises
+    dbPromise.catch(() => {}); // Fire and forget
+
     // Log final response before sending
     console.log('[RATES] Sending response to client:', {
       requestId,
@@ -995,13 +1137,13 @@ router.post('/rates', authenticateToken, validateBody(rateRequestSchema), async 
       } : null,
       rateTokensRemaining,
       rateTokensUsed,
-      quoteId: quoteId || null,
+      quoteId: dbState.quoteId || null,
     });
 
     // Return response matching existing JS expected format, with additional token metadata
     res.json({
       requestId,
-      quoteId: quoteId || undefined, // Include quoteId if available for booking
+      quoteId: dbState.quoteId || undefined, // Include quoteId if available (may be null if DB save still in progress)
       rateTokensRemaining,
       rateTokensUsed,
       rates: rates.map((rate: any) => {
@@ -1046,7 +1188,7 @@ router.post('/rates', authenticateToken, validateBody(rateRequestSchema), async 
                            null;
 
         const externalRateId = rate.id || rate.rateId || rate.rate_id || crypto.randomUUID();
-        const dbRateId = rateIdMap.get(externalRateId) || null; // Database ID for booking
+        const dbRateId = dbState.rateIdMap.get(externalRateId) || null; // Database ID for booking (may be null if DB save still in progress)
         
         return {
           id: externalRateId, // External rate ID

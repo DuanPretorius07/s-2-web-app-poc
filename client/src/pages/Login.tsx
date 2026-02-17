@@ -221,6 +221,7 @@ export default function Login() {
                 value={email}
                 onChange={(e) => {
                   setEmail(e.target.value);
+                  // Clear errors when user types
                   if (fieldErrors.email) {
                     setFieldErrors(prev => {
                       const newErrors = { ...prev };
@@ -228,9 +229,23 @@ export default function Login() {
                       return newErrors;
                     });
                   }
+                  // Clear general error if it was a validation error
+                  if (error && error.includes('validation')) {
+                    setError('');
+                  }
+                }}
+                onInvalid={(e) => {
+                  // Handle browser HTML5 validation
+                  const target = e.target as HTMLInputElement;
+                  if (!isRegister) {
+                    // For login, show simple login error, not registration validation
+                    e.preventDefault();
+                    setError('Please enter a valid email address');
+                    target.setCustomValidity('');
+                  }
                 }}
               />
-              {fieldErrors.email && (
+              {fieldErrors.email && isRegister && (
                 <p className="text-red-500 text-sm mt-1">{fieldErrors.email}</p>
               )}
             </div>
@@ -366,6 +381,8 @@ export default function Login() {
               onClick={() => {
                 setIsRegister(!isRegister);
                 setError('');
+                setFieldErrors({}); // Clear all field errors when switching modes
+                setPasswordError(null); // Clear password error
               }}
               className="text-sm text-s2-red hover:text-s2-red-dark font-medium"
             >
