@@ -602,6 +602,33 @@ async function upsertHubSpotContactIfOptedIn(user: {
   }
 }
 
+/** Retry fetch on transient network errors (ECONNRESET, etc.) common on Vercel serverless */
+async function fetchWithRetry(
+  url: string,
+  options: RequestInit,
+  maxAttempts: number = 3
+): Promise<Response> {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const res = await fetch(url, {
+        ...options,
+        signal: AbortSignal.timeout(15000), // 15s per attempt
+      });
+      return res;
+    } catch (err: any) {
+      lastError = err;
+      const code = err?.cause?.code ?? err?.code;
+      const isTransient = code === 'ECONNRESET' || code === 'ETIMEDOUT' || code === 'ECONNREFUSED' || err?.message?.includes('fetch failed');
+      if (!isTransient || attempt === maxAttempts) throw err;
+      const delayMs = Math.min(1000 * Math.pow(2, attempt - 1), 4000);
+      console.warn(`[HubSpot] Attempt ${attempt}/${maxAttempts} failed (${code ?? err?.message}), retrying in ${delayMs}ms`);
+      await new Promise((r) => setTimeout(r, delayMs));
+    }
+  }
+  throw lastError;
+}
+
 async function createHubSpotNote(
   contactEmail: string,
   rates: NormalizedRate[],
@@ -624,8 +651,8 @@ async function createHubSpotNote(
   }
 
   try {
-    // Find contact by email
-    const searchResponse = await fetch(
+    // Find contact by email (with retry for Vercel TLS/connection issues)
+    const searchResponse = await fetchWithRetry(
       `https://api.hubapi.com/crm/v3/objects/contacts/search`,
       {
         method: 'POST',
@@ -748,7 +775,7 @@ ${statusSection}`;
       });
     }
 
-    const noteResponse = await fetch('https://api.hubapi.com/crm/v3/objects/notes', {
+    const noteResponse = await fetchWithRetry('https://api.hubapi.com/crm/v3/objects/notes', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -886,7 +913,7 @@ router.post('/rates', authenticateToken, validateBody(rateRequestSchema), async 
         errorMessage.toLowerCase().includes('task timed out') ||
         (process.env.VERCEL === '1' && errorMessage.includes('30'));
       
-      // Log API error to HubSpot (non-blocking)
+      // Log API error to HubSpot; on Vercel await so function doesn't exit before request completes
       if (dbUser?.email) {
         const dealId = req.body.hubspotContext?.dealId || req.query.dealId as string | undefined;
         const errorPayload = {
@@ -896,7 +923,7 @@ router.post('/rates', authenticateToken, validateBody(rateRequestSchema), async 
         const hubspotErrorMessage = isTimeoutError 
           ? 'Vercel Runtime Timeout: Request exceeded 30-second limit'
           : errorMessage || 'Unknown API error';
-        createHubSpotNote(
+        const notePromise = createHubSpotNote(
           dbUser.email,
           [],
           errorPayload,
@@ -906,6 +933,12 @@ router.post('/rates', authenticateToken, validateBody(rateRequestSchema), async 
         ).catch((err) => {
           console.error('[RATES] Failed to log API error to HubSpot:', err);
         });
+        if (process.env.VERCEL === '1') {
+          await Promise.race([
+            notePromise,
+            new Promise((r) => setTimeout(r, 10000)),
+          ]).catch(() => {});
+        }
       }
       
       // Return specific error for timeout
@@ -970,14 +1003,14 @@ router.post('/rates', authenticateToken, validateBody(rateRequestSchema), async 
           ? `No ${rateTypes.join(', ')} rates were found for your request. Please adjust your mode or shipment details and try again.`
           : 'No rates were found for your request. Please adjust your shipment details and try again.');
       
-      // Log no-rates to HubSpot (non-blocking)
+      // Log no-rates to HubSpot; on Vercel await so function doesn't exit before request completes
       if (dbUser?.email) {
         const dealId = req.body.hubspotContext?.dealId || req.query.dealId as string | undefined;
         const noRatesPayload = {
           ...requestPayload,
           rateTokenConsumed: true, // Token was consumed even though no rates returned
         };
-        createHubSpotNote(
+        const notePromise = createHubSpotNote(
           dbUser.email,
           [],
           noRatesPayload,
@@ -986,6 +1019,12 @@ router.post('/rates', authenticateToken, validateBody(rateRequestSchema), async 
         ).catch((err) => {
           console.error('[RATES] Failed to log no-rates to HubSpot:', err);
         });
+        if (process.env.VERCEL === '1') {
+          await Promise.race([
+            notePromise,
+            new Promise((r) => setTimeout(r, 10000)),
+          ]).catch(() => {});
+        }
       }
       
       return res.json({
@@ -1210,8 +1249,7 @@ router.post('/rates', authenticateToken, validateBody(rateRequestSchema), async 
         rateTokenConsumed: true, // Token was consumed for successful requests
       };
       
-      // Fire HubSpot note creation (non-blocking)
-      // On Vercel, ensure the promise is tracked so it completes before function termination
+      // Fire HubSpot note creation; on Vercel await so function doesn't exit before request completes
       const notePromise = createHubSpotNote(
         dbUser.email, 
         normalizedRates, 
@@ -1222,12 +1260,10 @@ router.post('/rates', authenticateToken, validateBody(rateRequestSchema), async 
         console.error('[RATES] HubSpot note creation error:', err);
       });
       
-      // On Vercel, track the promise to ensure it completes
       if (process.env.VERCEL === '1') {
-        // Give HubSpot call time to complete (max 5 seconds)
-        Promise.race([
+        await Promise.race([
           notePromise,
-          new Promise(resolve => setTimeout(resolve, 5000)),
+          new Promise((r) => setTimeout(r, 10000)),
         ]).catch(() => {});
       }
     }
