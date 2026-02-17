@@ -14,7 +14,7 @@ import RateTokensNotification from './components/RateTokensNotification';
 import TokenExpirationModal from './components/TokenExpirationModal';
 
 function AppRoutes() {
-  const { user, loading, tokenExpired, setTokenExpired } = useAuth();
+  const { user, loading, tokenExpired } = useAuth();
 
   if (loading) {
     return (
