@@ -11,9 +11,10 @@ import ProtectedRoute from './components/ProtectedRoute';
 import HubSpotEmbed from './components/HubSpotEmbed';
 import HelpButton from './components/HelpButton';
 import RateTokensNotification from './components/RateTokensNotification';
+import TokenExpirationModal from './components/TokenExpirationModal';
 
 function AppRoutes() {
-  const { user, loading } = useAuth();
+  const { user, loading, tokenExpired, setTokenExpired } = useAuth();
 
   if (loading) {
     return (
@@ -24,16 +25,18 @@ function AppRoutes() {
   }
 
   return (
-    <Routes>
-      <Route path="/login" element={user ? <Navigate to="/" /> : <Login />} />
-      <Route
-        path="/"
-        element={
-          <ProtectedRoute>
-            <RatesForm />
-          </ProtectedRoute>
-        }
-      />
+    <>
+      <TokenExpirationModal isOpen={tokenExpired} onClose={() => setTokenExpired(false)} />
+      <Routes>
+        <Route path="/login" element={user ? <Navigate to="/" /> : <Login />} />
+        <Route
+          path="/"
+          element={
+            <ProtectedRoute>
+              <RatesForm />
+            </ProtectedRoute>
+          }
+        />
       {/*
         History and detail routes are disabled for now.
         They can be re-enabled by uncommenting these routes when the client is ready.
@@ -63,7 +66,8 @@ function AppRoutes() {
         }
       />
       */}
-    </Routes>
+      </Routes>
+    </>
   );
 }
 

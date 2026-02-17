@@ -606,7 +606,9 @@ async function createHubSpotNote(
   contactEmail: string,
   rates: NormalizedRate[],
   requestPayload: any,
-  dealId?: string
+  dealId?: string,
+  status: 'success' | 'no_rates' | 'error' = 'success',
+  errorMessage?: string
 ) {
   // #region agent log
   fetch('http://127.0.0.1:7242/ingest/fbdc8caf-9cc6-403b-83c1-f186ed9b4695',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'rates.ts:createHubSpotNote:entry',message:'createHubSpotNote called',data:{contactEmail,ratesCount:rates.length,hasDealId:!!dealId},timestamp:Date.now(),runId:'hubspot-debug',hypothesisId:'H4'})}).catch(()=>{});
@@ -684,25 +686,38 @@ async function createHubSpotNote(
       shipmentDetails.push(`Packaging: ${freightInfo.dimType || requestPayload.packagingType}`);
     }
 
-    // Get top 3 cheapest rates (already sorted)
-    const top3Rates = rates.slice(0, 3).map((r, idx) => {
-      const carrier = r.carrierName || 'Unknown';
-      const service = r.serviceName || 'Standard';
-      const price = r.totalCost?.toFixed(2) || '0.00';
-      const transit = r.transitDays ? `${r.transitDays} day${r.transitDays === 1 ? '' : 's'}` : 'N/A';
-      return `${idx + 1}. ${carrier} - ${service}: $${price} (${transit})`;
-    });
+    // Build status indicator
+    let statusIndicator = '';
+    let statusSection = '';
+    
+    if (status === 'success' && rates.length > 0) {
+      statusIndicator = '✅';
+      // Get top 3 cheapest rates (already sorted)
+      const top3Rates = rates.slice(0, 3).map((r, idx) => {
+        const carrier = r.carrierName || 'Unknown';
+        const service = r.serviceName || 'Standard';
+        const price = r.totalCost?.toFixed(2) || '0.00';
+        const transit = r.transitDays ? `${r.transitDays} day${r.transitDays === 1 ? '' : 's'}` : 'N/A';
+        return `${idx + 1}. ${carrier} - ${service}: $${price} (${transit})`;
+      });
+      statusSection = `💰 Top 3 Options:\n${top3Rates.map(rate => `   ${rate}`).join('\n')}`;
+    } else if (status === 'no_rates') {
+      statusIndicator = '⚠️';
+      statusSection = `⚠️ No rates found for this request.\n   Rate token was ${requestPayload.rateTokenConsumed ? 'consumed' : 'NOT consumed'}.`;
+    } else if (status === 'error') {
+      statusIndicator = '❌';
+      statusSection = `❌ API Error:\n   ${errorMessage || 'Unknown error occurred'}\n   Rate token was ${requestPayload.rateTokenConsumed ? 'consumed' : 'NOT consumed'}.`;
+    }
 
     // Build formatted note body with proper styling
-    const noteBody = `📦 Shipping Rate Request
+    const noteBody = `${statusIndicator} Shipping Rate Request
 
 📍 Lane: ${lane}
 
 📋 Shipment Details:
 ${shipmentDetails.map(detail => `   • ${detail}`).join('\n')}
 
-💰 Top 3 Options:
-${top3Rates.map(rate => `   ${rate}`).join('\n')}`;
+${statusSection}`;
 
     // Build note payload according to HubSpot API structure
     // Note: hs_activity_type is NOT a valid property for Notes objects
@@ -856,10 +871,53 @@ router.post('/rates', authenticateToken, validateBody(rateRequestSchema), async 
 
     // Forward request to Ship2Primus (or legacy proxy) - payload forwarded UNCHANGED (per requirements)
     let apiResponse: any;
+    let apiError: any = null;
     try {
       apiResponse = await callRatesAPI(requestPayload);
     } catch (error: any) {
       console.error('[RATES] Upstream API error:', error);
+      apiError = error;
+      
+      // Check if this is a Vercel timeout error
+      const errorMessage = error?.message || '';
+      const isTimeoutError = 
+        errorMessage.toLowerCase().includes('timeout') ||
+        errorMessage.toLowerCase().includes('timed out') ||
+        errorMessage.toLowerCase().includes('task timed out') ||
+        (process.env.VERCEL === '1' && errorMessage.includes('30'));
+      
+      // Log API error to HubSpot (non-blocking)
+      if (dbUser?.email) {
+        const dealId = req.body.hubspotContext?.dealId || req.query.dealId as string | undefined;
+        const errorPayload = {
+          ...requestPayload,
+          rateTokenConsumed: false, // Token not consumed on API error
+        };
+        const hubspotErrorMessage = isTimeoutError 
+          ? 'Vercel Runtime Timeout: Request exceeded 30-second limit'
+          : errorMessage || 'Unknown API error';
+        createHubSpotNote(
+          dbUser.email,
+          [],
+          errorPayload,
+          dealId,
+          'error',
+          hubspotErrorMessage
+        ).catch((err) => {
+          console.error('[RATES] Failed to log API error to HubSpot:', err);
+        });
+      }
+      
+      // Return specific error for timeout
+      if (isTimeoutError) {
+        return res.status(504).json({
+          requestId,
+          errorCode: 'VERCEL_TIMEOUT',
+          message: 'The rate search request timed out after 30 seconds. This may occur when fetching many rates or during high load. Please try again with fewer rate types or contact support if the issue persists.',
+          details: process.env.NODE_ENV === 'development' ? error.message : undefined,
+        });
+      }
+      
       return res.status(502).json({
         requestId,
         errorCode: 'UPSTREAM_ERROR',
@@ -911,6 +969,24 @@ router.post('/rates', authenticateToken, validateBody(rateRequestSchema), async 
         (rateTypes.length 
           ? `No ${rateTypes.join(', ')} rates were found for your request. Please adjust your mode or shipment details and try again.`
           : 'No rates were found for your request. Please adjust your shipment details and try again.');
+      
+      // Log no-rates to HubSpot (non-blocking)
+      if (dbUser?.email) {
+        const dealId = req.body.hubspotContext?.dealId || req.query.dealId as string | undefined;
+        const noRatesPayload = {
+          ...requestPayload,
+          rateTokenConsumed: true, // Token was consumed even though no rates returned
+        };
+        createHubSpotNote(
+          dbUser.email,
+          [],
+          noRatesPayload,
+          dealId,
+          'no_rates'
+        ).catch((err) => {
+          console.error('[RATES] Failed to log no-rates to HubSpot:', err);
+        });
+      }
       
       return res.json({
         requestId,
@@ -1091,8 +1167,8 @@ router.post('/rates', authenticateToken, validateBody(rateRequestSchema), async 
       console.log('[RATES] Sample rate structure:', JSON.stringify(rates[0], null, 2));
     }
 
-    // Create HubSpot note if user exists and rates are available
-    if (dbUser?.email && rates.length > 0) {
+    // Create HubSpot note if user exists (always log, regardless of rates count)
+    if (dbUser?.email) {
       // Normalize rates for HubSpot note
       const normalizedRates: NormalizedRate[] = rates.map((rate: any) => {
         const carrierName = rate.name || 
@@ -1127,9 +1203,22 @@ router.post('/rates', authenticateToken, validateBody(rateRequestSchema), async 
       // Extract dealId from request if available (could be in hubspotContext or query params)
       const dealId = req.body.hubspotContext?.dealId || req.query.dealId as string | undefined;
       
+      // Determine status and prepare payload
+      const status: 'success' | 'no_rates' | 'error' = rates.length > 0 ? 'success' : 'no_rates';
+      const notePayload = {
+        ...requestPayload,
+        rateTokenConsumed: true, // Token was consumed for successful requests
+      };
+      
       // Fire HubSpot note creation (non-blocking)
       // On Vercel, ensure the promise is tracked so it completes before function termination
-      const notePromise = createHubSpotNote(dbUser.email, normalizedRates, requestPayload, dealId).catch((err) => {
+      const notePromise = createHubSpotNote(
+        dbUser.email, 
+        normalizedRates, 
+        notePayload, 
+        dealId,
+        status
+      ).catch((err) => {
         console.error('[RATES] HubSpot note creation error:', err);
       });
       

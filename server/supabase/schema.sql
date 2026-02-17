@@ -119,3 +119,31 @@ CREATE POLICY "Service role can do everything" ON quote_requests FOR ALL USING (
 CREATE POLICY "Service role can do everything" ON rates FOR ALL USING (auth.role() = 'service_role');
 CREATE POLICY "Service role can do everything" ON bookings FOR ALL USING (auth.role() = 'service_role');
 CREATE POLICY "Service role can do everything" ON audit_logs FOR ALL USING (auth.role() = 'service_role');
+
+-- Function to consume a rate token for a client
+-- Decrements rate_tokens_remaining and increments rate_tokens_used
+-- Returns the updated token counts
+CREATE OR REPLACE FUNCTION consume_rate_token(p_client_id UUID)
+RETURNS TABLE (
+  rate_tokens_remaining INTEGER,
+  rate_tokens_used INTEGER
+) 
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+  v_remaining INTEGER;
+  v_used INTEGER;
+BEGIN
+  -- Update the client's token counts atomically
+  UPDATE clients
+  SET 
+    rate_tokens_remaining = GREATEST(0, rate_tokens_remaining - 1),
+    rate_tokens_used = rate_tokens_used + 1
+  WHERE id = p_client_id
+  RETURNING rate_tokens_remaining, rate_tokens_used INTO v_remaining, v_used;
+  
+  -- Return the updated values
+  RETURN QUERY SELECT v_remaining, v_used;
+END;
+$$;

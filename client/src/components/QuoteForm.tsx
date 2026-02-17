@@ -46,7 +46,6 @@ interface RateResult {
 
 // Match backend API expectations
 const FREIGHT_TYPES = [
-  { value: '', label: 'Please Select' },
   { value: 'LTL', label: 'LTL' },
   { value: 'GUARANTEED', label: 'Guaranteed' },
   { value: 'SP', label: 'Small Package' },
@@ -61,7 +60,7 @@ const PACKAGING_TYPES = [
 ];
 
 export default function QuoteForm() {
-  const { user, updateRateTokens } = useAuth();
+  const { user, updateRateTokens, setTokenExpired } = useAuth();
   const [formData, setFormData] = useState<QuoteFormData>({
     origin: {
       country: 'US',
@@ -203,6 +202,11 @@ export default function QuoteForm() {
     if (!formData.width || isNaN(widthNum) || widthNum <= 0) newErrors.width = 'Width must be greater than 0';
     if (!formData.height || isNaN(heightNum) || heightNum <= 0) newErrors.height = 'Height must be greater than 0';
     if (!formData.weight || isNaN(weightNum) || weightNum <= 0) newErrors.weight = 'Weight must be greater than 0';
+    
+    // Validate freight type is selected
+    if (!formData.freightType || formData.freightType.trim() === '') {
+      newErrors.freightType = 'Freight type is required';
+    }
 
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
@@ -232,16 +236,13 @@ export default function QuoteForm() {
       // Normalize freight type to match backend expectations
       const normalizeFreightType = (raw: string): string[] => {
         const v = (raw || '').toString().trim().toUpperCase();
-        const DEFAULT_ALL = ['LTL', 'GUARANTEED', 'SP', 'VOL'];
         const SUPPORTED = ['LTL', 'GUARANTEED', 'SP', 'VOL', 'AIR'];
         
-        if (!v || v === 'ALL' || v === 'PLEASE SELECT') {
-          return DEFAULT_ALL;
-        } else if (SUPPORTED.includes(v)) {
-          return [v];
-        } else {
-          return DEFAULT_ALL;
+        if (!v || !SUPPORTED.includes(v)) {
+          throw new Error('Freight type must be selected');
         }
+        
+        return [v];
       };
 
       const stackableYes = formData.stackable === 'Yes';
@@ -305,6 +306,25 @@ export default function QuoteForm() {
 
       console.log('[QuoteForm] Response status:', response.status, response.statusText);
       console.log('[QuoteForm] Response ok:', response.ok);
+      
+      // Handle token expiration - only if error code indicates token expired
+      if (response.status === 401) {
+        try {
+          const errorData = await response.json();
+          if (errorData.errorCode === 'TOKEN_EXPIRED') {
+            setTokenExpired(true);
+            return;
+          }
+          // Other 401 errors - just throw error, don't show expiration modal
+          throw new Error(errorData.message || 'Authentication required');
+        } catch (e) {
+          // If we can't parse error, check if it's already an Error object
+          if (e instanceof Error) {
+            throw e;
+          }
+          throw new Error('Authentication required');
+        }
+      }
 
       const data = await response.json();
       console.log('[QuoteForm] Response data:', {
@@ -336,6 +356,12 @@ export default function QuoteForm() {
           setGeneralMessage(
             data.message ||
               'Hazardous materials require direct handling by S2 International. Please contact us for a quote.'
+          );
+        } else if (data.errorCode === 'VERCEL_TIMEOUT') {
+          setContactReason('error');
+          setGeneralMessage(
+            data.message ||
+              'The rate search request timed out. This may occur when fetching many rates. Please try again with fewer rate types or contact support if the issue persists.'
           );
         } else {
           setContactReason('error');
@@ -648,14 +674,21 @@ export default function QuoteForm() {
               <select
                 value={formData.freightType}
                 onChange={(e) => handleChange('freightType', e.target.value)}
-                className="w-full border rounded px-3 py-2 text-sm shadow-sm focus:ring-s2-red focus:border-s2-red"
+                className={`w-full border rounded px-3 py-2 text-sm shadow-sm focus:ring-s2-red focus:border-s2-red ${
+                  errors.freightType ? 'border-red-500' : ''
+                }`}
+                required
               >
+                <option value="" disabled>Please Select</option>
                 {FREIGHT_TYPES.map((type) => (
                   <option key={type.value} value={type.value}>
                     {type.label}
                   </option>
                 ))}
               </select>
+              {errors.freightType && (
+                <p className="text-red-500 text-sm mt-1">{errors.freightType}</p>
+              )}
             </div>
 
             <div>

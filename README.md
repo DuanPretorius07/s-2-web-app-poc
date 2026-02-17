@@ -6,6 +6,9 @@ A full-stack shipping quote and booking portal web application designed for HubS
 
 - **Multi-tenant Architecture**: Each client (tenant) has isolated data and users
 - **Authentication**: JWT-based auth with HttpOnly cookies, role-based access (ADMIN/USER)
+  - **Token Expiration**: Tokens expire after 1 hour of inactivity
+  - **Auto-logout**: Automatic session expiration with modal notification and redirect to login
+  - **Token Renewal**: Tokens are renewed on each successful login
 - **Registration with Password Validation**: Detailed password requirements with real-time feedback
   - Minimum 8 characters
   - At least one letter
@@ -19,12 +22,19 @@ A full-stack shipping quote and booking portal web application designed for HubS
 - **Shipping Flow**: Get rates → View results → Book shipment
 - **HubSpot Integration**: Embeddable via iframe or script loader with context prefill
 - **HubSpot CRM Writeback**: Automatic contact sync and rate request notes (when configured)
+  - **Comprehensive Logging**: All rate requests are logged to HubSpot notes (success, no rates, errors)
+  - **Status Indicators**: Notes include status indicators (✅ success, ⚠️ no rates, ❌ errors)
+  - **Error Logging**: API errors are logged to HubSpot with detailed error messages
+  - **Token Tracking**: Notes indicate whether rate tokens were consumed
 - **Rate Limiting**: 3 quote requests per email (lifetime) with clear user messaging
 - **Hazmat Blocking**: Automatic blocking of hazardous materials with contact S2 guidance
 - **UI Improvements**:
   - Static background (no distracting animations)
   - Rate tokens notification with proper z-index layering
   - Improved error messages throughout the application
+  - **Freight Type Validation**: Required field - "Please Select" is disabled placeholder
+  - **Canadian Postal Code Support**: Auto-formatting for Canadian postal codes (e.g., "R0K 0B8")
+  - **Login Error Messages**: Specific error messages for email format, email not found, and incorrect password
 
 ## Tech Stack
 
@@ -102,7 +112,9 @@ A full-stack shipping quote and booking portal web application designed for HubS
    **Option A: Using Supabase (Recommended)**
    
    1. Create a Supabase project at https://supabase.com
-   2. Run the SQL schema from `server/supabase/schema.sql` in the Supabase SQL editor
+   2. Run the **complete** SQL schema from `server/supabase/schema.sql` in the Supabase SQL editor
+      - **IMPORTANT**: The schema includes a `consume_rate_token()` function that is required for rate token management
+      - Make sure to run the entire file, including the function definition at the end
    3. Copy your Supabase credentials
 
    **Option B: Using Local PostgreSQL**
@@ -134,7 +146,10 @@ A full-stack shipping quote and booking portal web application designed for HubS
    GEONAMES_USERNAME="your-geonames-username"
    
    # HubSpot Integration (optional - for automatic contact sync and notes)
+   # Note: Either HUBSPOT_PRIVATE_APP_TOKEN or HUBSPOT_ACCESS_TOKEN can be used
    HUBSPOT_PRIVATE_APP_TOKEN="your-hubspot-private-app-token"
+   # OR
+   HUBSPOT_ACCESS_TOKEN="your-hubspot-access-token"
    
    # CORS Configuration
    ALLOWED_ORIGINS="http://localhost:3000,https://app.hubspot.com,https://*.hubspot.com"
@@ -184,11 +199,21 @@ npm run test:client
 
 ### Authentication
 - `POST /api/auth/login` - Login with email and password
+  - Returns specific error messages:
+    - "Invalid email or password format" for invalid email format
+    - "This email address is not registered..." for non-existent emails
+    - "Incorrect password..." for wrong passwords
+  - Generates new JWT token with 1-hour expiration
+  - Clears any existing token cookie before setting new one
 - `POST /api/auth/logout` - Logout (clears JWT cookie)
+  - Does NOT require authentication (allows logout with expired tokens)
+  - Always clears cookie regardless of token validity
 - `GET /api/auth/me` - Get current authenticated user
+  - Returns 401 with `TOKEN_EXPIRED` error code when token expires
 - `POST /api/auth/register` - Register new user/client
   - Validates password requirements (8+ chars, letter, number)
   - Returns detailed validation errors
+  - Automatically creates HubSpot contact (when configured)
 - `POST /api/auth/invite` - Invite user (ADMIN only)
 
 ### Rates & Booking
@@ -197,6 +222,9 @@ npm run test:client
   - Enforces 3 quote requests per email (lifetime)
   - Blocks hazmat shipments with contact S2 message
   - Automatically creates HubSpot notes (when configured)
+    - Logs all requests: success (✅), no rates (⚠️), and errors (❌)
+    - Includes top 3 cheapest rates for successful requests
+    - Tracks whether rate tokens were consumed
   - Returns rates sorted by price (cheapest first)
 - `POST /api/book` - Book a shipment
   - Requires authentication
@@ -340,7 +368,12 @@ The complete SQL schema is in `server/supabase/schema.sql`. Key tables:
 ## Security
 
 - **Passwords**: Hashed with bcrypt (10 rounds)
-- **Authentication**: JWT tokens in HttpOnly cookies (7-day expiration)
+- **Authentication**: JWT tokens in HttpOnly cookies (1-hour expiration)
+  - Tokens automatically expire after 1 hour of inactivity
+  - Auto-logout modal appears when token expires (only on actual expiration, not on manual logout)
+  - Tokens are renewed on each successful login
+  - Logout endpoint does not require authentication (allows logout with expired tokens)
+  - Logout endpoint does not require authentication (allows logout with expired tokens)
 - **CORS**: Allowlist for HubSpot domains
 - **Input Validation**: Zod schemas for all API endpoints
 - **Multi-tenant Isolation**: Enforced at database level with client_id filtering
@@ -467,7 +500,39 @@ The application includes robust retry logic for GeoNames API calls:
 
 This ensures >95% success rate even with GeoNames API instability.
 
+## Required Database Functions
+
+The application requires a PostgreSQL function for rate token management. This function is included in `server/supabase/schema.sql`:
+
+- **`consume_rate_token(p_client_id UUID)`**: Atomically decrements `rate_tokens_remaining` and increments `rate_tokens_used` for a client. Returns the updated token counts.
+
+**IMPORTANT**: When setting up your database, make sure to run the **entire** `server/supabase/schema.sql` file, including the function definition at the end. Without this function, rate token consumption will fail.
+
 ## Recent Updates
+
+### Latest Changes (February 2025)
+
+- **Token Expiration Fix**: Fixed token expiration modal appearing incorrectly
+  - Modal now only appears when token actually expires (TOKEN_EXPIRED error code)
+  - Manual logout properly clears expiration state without showing modal
+  - Token expiration checks are more accurate and only trigger on actual expiration
+  
+- **Database Function**: Added `consume_rate_token()` function to SQL schema
+  - Required for rate token management
+  - Must be included when running schema.sql in Supabase
+  - Function atomically updates token counts
+  
+- **Audit Log Fix**: Fixed promise handling for audit log inserts
+  - Wrapped in async IIFE to prevent `.catch is not a function` errors
+  - Non-blocking audit logging that doesn't affect login flow
+  
+- **Login Flow Improvements**: Enhanced login error handling and token management
+  - Clears existing cookies before setting new token
+  - Better state management on login/logout
+  - Proper token renewal on each login
+  - Logout works even with expired tokens
+
+### Previous Updates
 
 ### Registration Improvements
 - Added detailed password validation with real-time feedback

@@ -1,26 +1,46 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 
 export default function RateTokensNotification() {
   const { user } = useAuth();
   const [showNotification, setShowNotification] = useState(false);
-  const [hasShown, setHasShown] = useState(false);
+  const previousTokensRef = useRef<{ remaining: number | null; used: number | null } | null>(null);
 
   useEffect(() => {
-    // Only show notification once per session
-    if (hasShown || !user) return;
+    if (!user) {
+      setShowNotification(false);
+      previousTokensRef.current = null;
+      return;
+    }
 
     const tokensRemaining = user.rateTokensRemaining ?? 3;
     const tokensUsed = user.rateTokensUsed ?? 0;
-    const isNewUser = tokensUsed === 0 && tokensRemaining === 3;
-    const hasNoTokens = tokensRemaining === 0;
+    const previousTokens = previousTokensRef.current;
 
-    // Show notification for new users or users with no tokens
-    if (isNewUser || hasNoTokens) {
+    // Show notification:
+    // 1. After login (when user first loads and has tokens)
+    // 2. After rate search (when tokens change)
+    const shouldShow = 
+      // First time user loads (after login)
+      previousTokens === null ||
+      // Tokens changed (after rate search)
+      (previousTokens.remaining !== tokensRemaining || previousTokens.used !== tokensUsed);
+
+    if (shouldShow) {
       setShowNotification(true);
-      setHasShown(true);
+      previousTokensRef.current = {
+        remaining: tokensRemaining,
+        used: tokensUsed,
+      };
+      
+      // Auto-hide after 8 seconds
+      const timer = setTimeout(() => {
+        setShowNotification(false);
+      }, 8000);
+      
+      return () => clearTimeout(timer);
     }
-  }, [user, hasShown]);
+  }, [user]);
 
   if (!showNotification || !user) return null;
 

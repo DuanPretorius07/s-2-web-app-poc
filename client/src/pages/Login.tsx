@@ -76,10 +76,18 @@ export default function Login() {
           }
         }
       } else {
-        await login(email, password);
-        navigate('/');
+        try {
+          await login(email, password);
+          navigate('/');
+        } catch (loginErr: any) {
+          // Handle login-specific errors
+          const errorMessage = loginErr?.message || 'Authentication failed';
+          setError(errorMessage);
+          console.error('[Login] Login error:', loginErr);
+        }
       }
     } catch (err: any) {
+      console.error('[Login] Form submission error:', err);
       setError(err.message || 'Authentication failed');
     } finally {
       setLoading(false);

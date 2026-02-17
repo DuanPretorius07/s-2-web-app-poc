@@ -43,31 +43,59 @@ function generateToken(user: { id: string; client_id: string; email: string; rol
   if (!secret) {
     throw new Error('JWT_SECRET not configured');
   }
+  // Token expires in 1 hour (3600 seconds)
+  const TOKEN_EXPIRY_SECONDS = 60 * 60; // 1 hour
+  
   return jwt.sign(
     {
       userId: user.id,
       clientId: user.client_id,
       email: user.email,
       role: user.role,
+      iat: Math.floor(Date.now() / 1000), // Issued at time
     },
     secret,
-    { expiresIn: '7d' }
+    { expiresIn: TOKEN_EXPIRY_SECONDS }
   );
 }
 
 function setTokenCookie(res: Response, token: string) {
+  // Cookie expires in 1 hour (matching token expiration)
+  const TOKEN_EXPIRY_MS = 60 * 60 * 1000; // 1 hour
+  
+  // Clear any existing cookie first to ensure clean state
+  res.clearCookie('token', {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    path: '/',
+  });
+  
+  // Set new cookie
   res.cookie('token', token, {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
     sameSite: 'lax',
-    maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+    maxAge: TOKEN_EXPIRY_MS,
+    path: '/', // Ensure cookie is set for all paths
   });
 }
 
 // POST /api/auth/login
 router.post('/login', validateBody(loginSchema), async (req, res) => {
   console.log('[LOGIN] Endpoint hit', { email: req.body?.email });
+  console.log('[LOGIN] Cookies received:', req.cookies);
+  console.log('[LOGIN] Headers:', { cookie: req.headers.cookie });
+  
   try {
+    // Clear any existing token cookie first to ensure clean state
+    res.clearCookie('token', {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      path: '/',
+    });
+    
     const { email, password } = req.body;
     console.log('[LOGIN] Processing login', { email });
 
@@ -149,14 +177,24 @@ router.post('/login', validateBody(loginSchema), async (req, res) => {
       email: user.email,
       role: user.role,
     });
+    
+    console.log('[LOGIN] Token generated, setting cookie', { userId: user.id, tokenLength: token.length });
     setTokenCookie(res, token);
+    console.log('[LOGIN] Cookie set successfully');
 
-    await supabaseAdmin.from('audit_logs').insert({
-      client_id: user.client_id,
-      user_id: user.id,
-      action: 'LOGIN',
-      metadata_json: { email: user.email },
-    });
+    // Audit log (non-blocking)
+    (async () => {
+      try {
+        await supabaseAdmin.from('audit_logs').insert({
+          client_id: user.client_id,
+          user_id: user.id,
+          action: 'LOGIN',
+          metadata_json: { email: user.email },
+        });
+      } catch (err) {
+        console.warn('[LOGIN] Audit log failed (non-critical):', err);
+      }
+    })();
 
     console.log('[LOGIN] Success, sending response', { userId: user.id });
     res.json({
@@ -175,15 +213,27 @@ router.post('/login', validateBody(loginSchema), async (req, res) => {
   } catch (error: any) {
     console.error('[LOGIN] Error caught:', error);
     console.error('[LOGIN] Error stack:', error?.stack);
+    console.error('[LOGIN] Error name:', error?.name);
+    console.error('[LOGIN] Error message:', error?.message);
     
     // Ensure response hasn't been sent
     if (!res.headersSent) {
-    res.status(500).json({
-      requestId: crypto.randomUUID(),
-      errorCode: 'INTERNAL_ERROR',
-        message: error?.message || 'Login failed',
+      // Clear any partial cookie that might have been set
+      res.clearCookie('token', {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        path: '/',
+      });
+      
+      res.status(500).json({
+        requestId: crypto.randomUUID(),
+        errorCode: 'INTERNAL_ERROR',
+        message: process.env.NODE_ENV === 'production' 
+          ? 'Login failed. Please try again later.' 
+          : error?.message || 'Login failed',
         details: process.env.NODE_ENV === 'development' ? error?.stack : undefined,
-    });
+      });
     } else {
       console.error('[LOGIN] Response already sent, cannot send error response');
     }
@@ -191,8 +241,18 @@ router.post('/login', validateBody(loginSchema), async (req, res) => {
 });
 
 // POST /api/auth/logout
-router.post('/logout', authenticateToken, async (req: AuthRequest, res) => {
-  res.clearCookie('token');
+// Note: Does NOT require authentication - allows logout even with expired tokens
+router.post('/logout', async (req: Request, res: Response) => {
+  // Clear the token cookie regardless of authentication status
+  // This allows users to logout even if their token has expired
+  res.clearCookie('token', {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    path: '/', // Ensure cookie is cleared from all paths
+  });
+  
+  console.log('[LOGOUT] Cookie cleared');
   res.json({ message: 'Logged out successfully' });
 });
 
