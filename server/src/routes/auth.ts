@@ -1,4 +1,4 @@
-import { Router, Response } from 'express';
+import { Router, Request, Response } from 'express';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import { z } from 'zod';
@@ -242,7 +242,7 @@ router.post('/login', validateBody(loginSchema), async (req, res) => {
 
 // POST /api/auth/logout
 // Note: Does NOT require authentication - allows logout even with expired tokens
-router.post('/logout', async (req: Request, res: Response) => {
+router.post('/logout', async (req: Request, res: Response): Promise<void> => {
   // Clear the token cookie regardless of authentication status
   // This allows users to logout even if their token has expired
   res.clearCookie('token', {
