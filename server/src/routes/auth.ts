@@ -44,7 +44,7 @@ function generateToken(user: { id: string; client_id: string; email: string; rol
     throw new Error('JWT_SECRET not configured');
   }
   // Token expires in 1 hour (3600 seconds)
-  const TOKEN_EXPIRY_SECONDS = 60 * 60; // 1 hour
+  const TOKEN_EXPIRY_SECONDS = 60 * 5; // 1 hour
   
   return jwt.sign(
     {
@@ -255,6 +255,45 @@ router.post('/logout', async (req: Request, res: Response): Promise<void> => {
   console.log('[LOGOUT] Cookie cleared');
   res.json({ message: 'Logged out successfully' });
 });
+
+// POST /api/auth/test/expire-token (DEVELOPMENT ONLY)
+// Test endpoint to manually trigger token expiration by setting an expired token
+if (process.env.NODE_ENV === 'development') {
+  router.post('/test/expire-token', authenticateToken, async (req: AuthRequest, res) => {
+    const secret = process.env.JWT_SECRET;
+    if (!secret) {
+      return res.status(500).json({ error: 'JWT_SECRET not configured' });
+    }
+
+    // Create an expired token (expired 1 second ago)
+    const expiredToken = jwt.sign(
+      {
+        userId: req.user!.userId,
+        clientId: req.user!.clientId,
+        email: req.user!.email,
+        role: req.user!.role,
+        iat: Math.floor(Date.now() / 1000) - 3601, // Issued 1 hour + 1 second ago
+        exp: Math.floor(Date.now() / 1000) - 1, // Expired 1 second ago
+      },
+      secret
+    );
+    
+    // Set the expired token as a cookie
+    res.cookie('token', expiredToken, {
+      httpOnly: true,
+      secure: false, // Development only
+      sameSite: 'lax',
+      path: '/',
+      maxAge: 60 * 60 * 1000, // 1 hour (doesn't matter since token is already expired)
+    });
+    
+    console.log('[TEST] Token manually expired for testing');
+    res.json({ 
+      message: 'Token expired for testing. Refresh the page to see the expiration modal.',
+      expired: true 
+    });
+  });
+}
 
 // GET /api/auth/me
 router.get('/me', authenticateToken, async (req: AuthRequest, res) => {

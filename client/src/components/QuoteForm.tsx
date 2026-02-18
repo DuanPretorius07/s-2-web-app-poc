@@ -112,6 +112,7 @@ export default function QuoteForm() {
     remaining: number | null;
     used: number | null;
   } | null>(null);
+  const [retryableError, setRetryableError] = useState(false);
 
   // Track form changes to reset button state
   useEffect(() => {
@@ -341,8 +342,13 @@ export default function QuoteForm() {
           status: response.status,
           errorCode: data.errorCode,
           message: data.message,
+          retryable: data.retryable,
           fullData: data,
         });
+
+        // Clear any stale rates when error occurs
+        setRates([]);
+        setShowRatesModal(false);
 
         // Handle specific error cases
         if (data.errorCode === 'RATE_LIMIT_EXCEEDED') {
@@ -357,15 +363,25 @@ export default function QuoteForm() {
             data.message ||
               'Hazardous materials require direct handling by S2 International. Please contact us for a quote.'
           );
-        } else if (data.errorCode === 'VERCEL_TIMEOUT') {
+        } else if (
+          data.errorCode === 'VERCEL_TIMEOUT' ||
+          data.errorCode === 'SHIPPRIMUS_CONNECTION' ||
+          data.errorCode === 'SHIPPRIMUS_API' ||
+          data.errorCode === 'UPSTREAM_ERROR' ||
+          data.errorCode === 'UNKNOWN'
+        ) {
+          // ShipPrimus API errors - show generic error with retry option
           setContactReason('error');
           setGeneralMessage(
             data.message ||
-              'The rate search request timed out. This may occur when fetching many rates. Please try again with fewer rate types or contact support if the issue persists.'
+              'Failed to retrieve rates from the shipping provider. Please try again or contact support if the issue persists.'
           );
+          // Set retryable flag so UI can show retry button
+          setRetryableError(data.retryable === true);
         } else {
           setContactReason('error');
           setGeneralMessage(data.message || 'Failed to retrieve rates. Please try again.');
+          setRetryableError(data.retryable === true);
         }
         return;
       }
@@ -428,8 +444,12 @@ export default function QuoteForm() {
         errorMessage: error instanceof Error ? error.message : String(error),
         errorStack: error instanceof Error ? error.stack : undefined,
       });
+      // Clear any stale rates when error occurs
+      setRates([]);
+      setShowRatesModal(false);
       setContactReason('error');
       setGeneralMessage('An error occurred. Please try again or contact support.');
+      setRetryableError(true);
     } finally {
       setIsSubmitting(false);
     }
@@ -607,7 +627,21 @@ export default function QuoteForm() {
       </h1>
 
       {contactReason && (
-        <ContactS2Message reason={contactReason} customMessage={generalMessage} />
+        <ContactS2Message 
+          reason={contactReason} 
+          customMessage={generalMessage}
+          showRetry={retryableError}
+          onRetry={async () => {
+            setRetryableError(false);
+            setContactReason(null);
+            setGeneralMessage(undefined);
+            // Trigger form submission by calling handleSubmit directly
+            const fakeEvent = {
+              preventDefault: () => {},
+            } as React.FormEvent<HTMLFormElement>;
+            await handleSubmit(fakeEvent);
+          }}
+        />
       )}
 
       <form onSubmit={handleSubmit} className="space-y-6">

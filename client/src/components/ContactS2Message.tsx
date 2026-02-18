@@ -1,6 +1,8 @@
 interface ContactS2MessageProps {
   reason: 'rate_limit' | 'hazmat' | 'error' | 'no_rates';
   customMessage?: string;
+  showRetry?: boolean;
+  onRetry?: () => void;
 }
 
 const MESSAGES: Record<ContactS2MessageProps['reason'], { title: string; message: string }> = {
@@ -26,21 +28,31 @@ const MESSAGES: Record<ContactS2MessageProps['reason'], { title: string; message
   },
 };
 
-export default function ContactS2Message({ reason, customMessage }: ContactS2MessageProps) {
+export default function ContactS2Message({ reason, customMessage, showRetry, onRetry }: ContactS2MessageProps) {
   const config = MESSAGES[reason];
 
   return (
     <div className="bg-blue-50 border-2 border-blue-300 rounded-lg p-6 my-6">
       <h3 className="text-xl font-bold text-blue-900 mb-3">{config.title}</h3>
       <p className="text-blue-800 mb-4">{customMessage || config.message}</p>
-      <a
-        href="https://www.s-2international.com/contact"
-        target="_blank"
-        rel="noopener noreferrer"
-        className="inline-block bg-s2-red text-white px-6 py-3 rounded-lg font-semibold hover:bg-s2-red-dark transition-colors"
-      >
-        Contact S2 International →
-      </a>
+      <div className="flex gap-4 flex-wrap">
+        {showRetry && onRetry && (
+          <button
+            onClick={onRetry}
+            className="inline-block bg-green-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-green-700 transition-colors"
+          >
+            Retry Request
+          </button>
+        )}
+        <a
+          href="https://www.s-2international.com/contact"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-block bg-s2-red text-white px-6 py-3 rounded-lg font-semibold hover:bg-s2-red-dark transition-colors"
+        >
+          Contact S2 International →
+        </a>
+      </div>
     </div>
   );
 }

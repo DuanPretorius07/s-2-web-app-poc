@@ -59,23 +59,32 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setTokenExpired(false);
       } else if (response.status === 401) {
         // Token expired or invalid - check for TOKEN_EXPIRED error code
+        let errorData: any = null;
         try {
-          const errorData = await response.json();
-          if (errorData.errorCode === 'TOKEN_EXPIRED') {
-            // Only show modal if we're not on login page and not logging out
-            const isOnLoginPage = window.location.pathname === '/login';
-            setUser(null);
-            if (!isOnLoginPage && !isLoggingOutRef.current) {
-              setTokenExpired(true);
-            }
-          } else {
-            // Other 401 errors - just clear user
-            setUser(null);
-            setTokenExpired(false);
+          const responseText = await response.text();
+          if (responseText) {
+            errorData = JSON.parse(responseText);
           }
         } catch (e) {
-          // Can't parse error - just clear user
-          setUser(null);
+          // Can't parse error - assume token expired if we had a user before
+          console.warn('[Auth] Could not parse 401 error response');
+        }
+        
+        const isOnLoginPage = window.location.pathname === '/login';
+        setUser(null);
+        
+        // Show expiration modal if:
+        // 1. Error code is TOKEN_EXPIRED
+        if (errorData?.errorCode === 'TOKEN_EXPIRED') {
+          if (!isOnLoginPage && !isLoggingOutRef.current) {
+            console.log('[Auth] Token expired - showing expiration modal');
+            setTokenExpired(true);
+          } else {
+            console.log('[Auth] Token expired but on login page or logging out - not showing modal');
+            setTokenExpired(false);
+          }
+        } else {
+          console.log('[Auth] 401 error but not TOKEN_EXPIRED:', errorData?.errorCode || 'unknown');
           setTokenExpired(false);
         }
       }
@@ -83,6 +92,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       console.error('Auth check failed:', error);
       setUser(null);
       // Don't show expiration modal on network errors
+      setTokenExpired(false);
     } finally {
       setLoading(false);
     }

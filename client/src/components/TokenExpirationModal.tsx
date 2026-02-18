@@ -10,17 +10,6 @@ export default function TokenExpirationModal({ isOpen }: TokenExpirationModalPro
   const { logout, setTokenExpired } = useAuth();
   const navigate = useNavigate();
 
-  useEffect(() => {
-    if (isOpen) {
-      // Auto-redirect after 3 seconds
-      const timer = setTimeout(() => {
-        handleRedirect();
-      }, 3000);
-
-      return () => clearTimeout(timer);
-    }
-  }, [isOpen, navigate]);
-
   const handleRedirect = async () => {
     // Clear expiration state first to prevent modal from showing during logout
     setTokenExpired(false);
@@ -61,7 +50,7 @@ export default function TokenExpirationModal({ isOpen }: TokenExpirationModalPro
         </div>
         <div className="mt-2">
           <p className="text-sm text-gray-500">
-            Your session has expired due to inactivity. Please log in again to continue.
+            Your session has expired. Click the button below to return to the login page where you can log in again to refresh your session.
           </p>
         </div>
         <div className="mt-6 flex justify-end">
@@ -70,7 +59,7 @@ export default function TokenExpirationModal({ isOpen }: TokenExpirationModalPro
             onClick={handleRedirect}
             className="inline-flex justify-center px-4 py-2 text-sm font-medium text-white bg-s2-red border border-transparent rounded-md hover:bg-s2-red-dark focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-s2-red"
           >
-            Re-login
+            Return to Login
           </button>
         </div>
       </div>

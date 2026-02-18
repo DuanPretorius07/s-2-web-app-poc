@@ -730,10 +730,10 @@ async function createHubSpotNote(
       statusSection = `💰 Top 3 Options:\n${top3Rates.map(rate => `   ${rate}`).join('\n')}`;
     } else if (status === 'no_rates') {
       statusIndicator = '⚠️';
-      statusSection = `⚠️ No rates found for this request.\n   Rate token was ${requestPayload.rateTokenConsumed ? 'consumed' : 'NOT consumed'}.`;
+      statusSection = `⚠️ No rates found for this request.\n   Rate token was ${requestPayload.rateTokenConsumed ? 'not consumed' : 'NOT consumed'}.`;
     } else if (status === 'error') {
       statusIndicator = '❌';
-      statusSection = `❌ API Error:\n   ${errorMessage || 'Unknown error occurred'}\n   Rate token was ${requestPayload.rateTokenConsumed ? 'consumed' : 'NOT consumed'}.`;
+      statusSection = `❌ API Error:\n   ${errorMessage || 'Unknown error occurred'}\n   Rate token was ${requestPayload.rateTokenConsumed ? 'not consumed' : 'NOT consumed'}.`;
     }
 
     // Build formatted note body with proper styling
@@ -902,27 +902,74 @@ router.post('/rates', authenticateToken, validateBody(rateRequestSchema), async 
     try {
       apiResponse = await callRatesAPI(requestPayload);
     } catch (error: any) {
-      console.error('[RATES] Upstream API error:', error);
+      console.error('[RATES] ShipPrimus API error:', error);
       apiError = error;
       
-      // Check if this is a Vercel timeout error
+      // Categorize error types
       const errorMessage = error?.message || '';
+      const errorCode = error?.code || error?.cause?.code || '';
+      
+      // Check for connection failures (beyond app's control)
+      const isConnectionError = 
+        errorCode === 'ECONNRESET' ||
+        errorCode === 'ETIMEDOUT' ||
+        errorCode === 'ECONNREFUSED' ||
+        errorCode === 'ENOTFOUND' ||
+        errorMessage.toLowerCase().includes('fetch failed') ||
+        errorMessage.toLowerCase().includes('network') ||
+        errorMessage.toLowerCase().includes('connection');
+      
+      // Check if this is a Vercel timeout error
       const isTimeoutError = 
         errorMessage.toLowerCase().includes('timeout') ||
         errorMessage.toLowerCase().includes('timed out') ||
         errorMessage.toLowerCase().includes('task timed out') ||
         (process.env.VERCEL === '1' && errorMessage.includes('30'));
       
-      // Log API error to HubSpot; on Vercel await so function doesn't exit before request completes
+      // Check for ShipPrimus API-specific errors (4xx, 5xx responses)
+      const isApiError = errorMessage.includes('Ship2Primus API request failed') || 
+                         errorMessage.includes('status');
+      
+      // Determine error category and message
+      let errorCategory: 'SHIPPRIMUS_CONNECTION' | 'SHIPPRIMUS_API' | 'VERCEL_TIMEOUT' | 'UNKNOWN';
+      let userMessage: string;
+      
+      if (isTimeoutError) {
+        errorCategory = 'VERCEL_TIMEOUT';
+        userMessage = 'The rate search request timed out. Please try again with fewer rate types or contact support if the issue persists.';
+      } else if (isConnectionError) {
+        errorCategory = 'SHIPPRIMUS_CONNECTION';
+        userMessage = 'Unable to connect to the shipping provider. This may be a temporary issue. Please try again in a moment.';
+      } else if (isApiError) {
+        errorCategory = 'SHIPPRIMUS_API';
+        userMessage = 'The shipping provider returned an error. Please try again or contact support if the issue persists.';
+      } else {
+        errorCategory = 'UNKNOWN';
+        userMessage = 'An unexpected error occurred while fetching rates. Please try again or contact support.';
+      }
+      
+      // Log detailed error to console (for S2 monitoring)
+      console.error('[RATES] ShipPrimus API Error Details:', {
+        requestId,
+        errorCategory,
+        errorCode,
+        errorMessage,
+        userId,
+        clientId,
+        originZipcode: requestPayload.originZipcode,
+        destinationZipcode: requestPayload.destinationZipcode,
+        rateTypes: requestPayload.rateTypesList,
+        stack: error?.stack,
+      });
+      
+      // Log API error to HubSpot (for S2 monitoring); on Vercel await so function doesn't exit before request completes
       if (dbUser?.email) {
         const dealId = req.body.hubspotContext?.dealId || req.query.dealId as string | undefined;
         const errorPayload = {
           ...requestPayload,
           rateTokenConsumed: false, // Token not consumed on API error
         };
-        const hubspotErrorMessage = isTimeoutError 
-          ? 'Vercel Runtime Timeout: Request exceeded 30-second limit'
-          : errorMessage || 'Unknown API error';
+        const hubspotErrorMessage = `[${errorCategory}] ${errorMessage || 'Unknown error'} (Code: ${errorCode || 'N/A'})`;
         const notePromise = createHubSpotNote(
           dbUser.email,
           [],
@@ -941,20 +988,13 @@ router.post('/rates', authenticateToken, validateBody(rateRequestSchema), async 
         }
       }
       
-      // Return specific error for timeout
-      if (isTimeoutError) {
-        return res.status(504).json({
-          requestId,
-          errorCode: 'VERCEL_TIMEOUT',
-          message: 'The rate search request timed out after 30 seconds. This may occur when fetching many rates or during high load. Please try again with fewer rate types or contact support if the issue persists.',
-          details: process.env.NODE_ENV === 'development' ? error.message : undefined,
-        });
-      }
-      
-      return res.status(502).json({
+      // Return error response with retry flag
+      const statusCode = isTimeoutError ? 504 : (isConnectionError ? 503 : 502);
+      return res.status(statusCode).json({
         requestId,
-        errorCode: 'UPSTREAM_ERROR',
-        message: 'Failed to fetch rates from shipping provider',
+        errorCode: errorCategory,
+        message: userMessage,
+        retryable: true, // Indicates UI should show retry option
         details: process.env.NODE_ENV === 'development' ? error.message : undefined,
       });
     }
